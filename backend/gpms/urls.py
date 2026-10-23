@@ -1,0 +1,25 @@
+from django.urls import path
+
+from .views import AuditListView, CsrfCookieView, DepartmentListView, GroupDetailView, GroupListView, GroupRequestDecisionView, GroupRequestDetailView, GroupRequestListCreateView, GroupRequestSubmitView, HealthView, LoginView, LogoutView, MeView, OneTimePasswordView, PasswordResetRequestView, ProjectDetailView, ProjectListView, ProjectNotesView, SupervisorListView
+
+urlpatterns = [
+    path("health/", HealthView.as_view(), name="health"),
+    path("auth/csrf/", CsrfCookieView.as_view(), name="csrf-cookie"),
+    path("auth/login/", LoginView.as_view(), name="login"),
+    path("auth/logout/", LogoutView.as_view(), name="logout"),
+    path("auth/me/", MeView.as_view(), name="me"),
+    path("auth/password-reset-requests/", PasswordResetRequestView.as_view(), name="password-reset-request"),
+    path("auth/one-time-password/<str:purpose>/", OneTimePasswordView.as_view(), name="one-time-password"),
+    path("departments/", DepartmentListView.as_view(), name="departments"),
+    path("supervisors/", SupervisorListView.as_view(), name="supervisors"),
+    path("group-requests/", GroupRequestListCreateView.as_view(), name="group-request-list-create"),
+    path("group-requests/<uuid:request_id>/", GroupRequestDetailView.as_view(), name="group-request-detail"),
+    path("group-requests/<uuid:request_id>/submit/", GroupRequestSubmitView.as_view(), name="group-request-submit"),
+    path("group-requests/<uuid:request_id>/<str:action>/", GroupRequestDecisionView.as_view(), name="group-request-decision"),
+    path("groups/", GroupListView.as_view(), name="group-list"),
+    path("groups/<uuid:group_id>/", GroupDetailView.as_view(), name="group-detail"),
+    path("projects/", ProjectListView.as_view(), name="project-list"),
+    path("projects/<uuid:project_id>/", ProjectDetailView.as_view(), name="project-detail"),
+    path("projects/<uuid:project_id>/notes/", ProjectNotesView.as_view(), name="project-notes"),
+    path("audit-log/", AuditListView.as_view(), name="audit-log"),
+]
