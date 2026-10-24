@@ -1,5 +1,5 @@
 /* واجهة المرحلة الخامسة: ربط الشاشة بواجهات GPMS الفعلية. */
-const API_BASE = (window.GPMS_API_BASE_URL || 'http://localhost:8001/api/v1').replace(/\/$/, '');
+const API_BASE = (window.GPMS_API_BASE_URL || 'https://MjdKhaled1.pythonanywhere.com/api/v1').replace(/\/$/, '');
 const backendRoleToUi = { dean: 'dean', department_chair: 'chair', supervisor: 'supervisor', student: 'student' };
 const apiRoleLabels = { dean: ['عميد الكلية', 'رئيس النظام'], chair: ['رئيس القسم', 'رئيس القسم'], supervisor: ['المشرف الأكاديمي', 'مشرف أكاديمي'], student: ['الطالب', 'طالب'] };
 state.apiUser = null;
