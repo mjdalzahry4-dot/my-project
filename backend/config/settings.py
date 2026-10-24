@@ -8,13 +8,28 @@ PROJECT_ROOT = BASE_DIR.parent
 SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY", "django-insecure-!q8#2f$k9@l0z&x5v3b1n7m4c6p9w2r8t5y1u3i7o9p")
 DEBUG = os.environ.get("DJANGO_DEBUG", "false").lower() in {"1", "true", "yes"}
 ALLOWED_HOSTS = [host.strip() for host in os.environ.get("DJANGO_ALLOWED_HOSTS", "localhost,127.0.0.1,testserver,MjdKhaled1.pythonanywhere.com").split(",") if host.strip()]
-CORS_ALLOWED_ORIGINS = {
-    origin.strip().rstrip("/")
-    for origin in os.environ.get("CORS_ORIGINS", os.environ.get("CORS_ALLOWED_ORIGINS", "http://localhost:8000,http://127.0.0.1:8000,https://MjdKhaled1.pythonanywhere.com,https://incandescent-stardust-31fbdc.netlify.app")).split(",")
-    if origin.strip()
-}
-CSRF_TRUSTED_ORIGINS = sorted(CORS_ALLOWED_ORIGINS)
+CORS_ALLOWED_ORIGINS = [
+    "http://localhost:8000",
+    "http://127.0.0.1:8000",
+    "https://MjdKhaled1.pythonanywhere.com",
+    "https://incandescent-stardust-31fbdc.netlify.app",
+]
 
+CSRF_TRUSTED_ORIGINS = [
+    "http://localhost:8000",
+    "http://127.0.0.1:8000",
+    "https://MjdKhaled1.pythonanywhere.com",
+    "https://incandescent-stardust-31fbdc.netlify.app",
+]
+
+CSRF_COOKIE_SAMESITE = "None"
+CSRF_COOKIE_SECURE = True
+SESSION_COOKIE_SAMESITE = "None"
+SESSION_COOKIE_SECURE = True
+CSRF_COOKIE_SAMESITE = "None"
+CSRF_COOKIE_SECURE = True
+SESSION_COOKIE_SAMESITE = "None"
+SESSION_COOKIE_SECURE = True
 INSTALLED_APPS = [
     "django.contrib.admin",
     "django.contrib.auth",
