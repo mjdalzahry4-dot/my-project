@@ -10,7 +10,7 @@ DEBUG = os.environ.get("DJANGO_DEBUG", "false").lower() in {"1", "true", "yes"}
 ALLOWED_HOSTS = [host.strip() for host in os.environ.get("DJANGO_ALLOWED_HOSTS", "localhost,127.0.0.1,testserver").split(",") if host.strip()]
 CORS_ALLOWED_ORIGINS = {
     origin.strip().rstrip("/")
-    for origin in os.environ.get("CORS_ORIGINS", os.environ.get("CORS_ALLOWED_ORIGINS", "http://localhost:8000,http://127.0.0.1:8000")).split(",")
+    for origin in os.environ.get("CORS_ORIGINS", os.environ.get("CORS_ALLOWED_ORIGINS","http://localhost:8000,http://127.0.0.1:8000,https://incandescent-stardust-31fbdc.netlify.app"
     if origin.strip()
 }
 CSRF_TRUSTED_ORIGINS = sorted(CORS_ALLOWED_ORIGINS)
