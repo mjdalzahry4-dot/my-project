@@ -326,7 +326,8 @@ document.addEventListener('submit', async event => {
     })
 });
 localStorage.setItem('authToken', authData.token);
-      startAsAuthenticated(user.user);
+const userResponse = await apiRequest('/auth/me/');
+startAsAuthenticated(userResponse.user);
     } catch (error) {
       state.apiError = error.message; login(); toast(error.message, 'error');
     }
