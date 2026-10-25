@@ -318,7 +318,14 @@ document.addEventListener('submit', async event => {
     const button = event.target.querySelector('[type="submit"]');
     button.disabled = true; button.textContent = 'جارٍ التحقق…';
     try {
-      const user = await apiRequest('/auth/login/', { method: 'POST', body: JSON.stringify({ identifier: document.querySelector('#login-user').value.trim(), password: document.querySelector('#login-password').value }) });
+      const authData = await apiRequest('/api-token-auth/', {
+    method: 'POST',
+    body: JSON.stringify({
+        username: document.getElementById('username').value,
+        password: document.getElementById('password').value
+    })
+});
+localStorage.setItem('authToken', authData.token);
       startAsAuthenticated(user.user);
     } catch (error) {
       state.apiError = error.message; login(); toast(error.message, 'error');
