@@ -26,15 +26,13 @@ $env:DJANGO_DEBUG = 'true'
 
 أول حساب فائق يُنشأ بدور العميد، ويمكنه الدخول إلى لوحة الإدارة على <http://127.0.0.1:8001/admin/> وإعداد الأقسام والحسابات. تتوفر نقاط API على <http://127.0.0.1:8001/api/v1/>. انسخ `.env.example` كمرجع للمتغيرات؛ الإعدادات تقرأ من بيئة العملية ولا تحمل ملف `.env` تلقائيًا. عند عدم ضبط `DATABASE_URL` يستخدم الخادم SQLite للتطوير. PostgreSQL مدعوم عبر `DATABASE_URL`.
 
-## النشر على Render
+## النشر عبر GitHub وNetlify وPythonAnywhere
 
-المشروع Django/Python وليس Node.js، لذا لا يحتاج `package.json` أو `npm start`. ملف `render.yaml` يعرّف خدمة Django التي تعرض الواجهة من `frontend/` وواجهة API على النطاق نفسه، ويستخدم `build.sh` لتثبيت المتطلبات وتجميع الملفات الثابتة. يتطلب النشر اختيار قاعدة PostgreSQL على Render وإضافة `DATABASE_URL` من إعدادات الخدمة. اختر قاعدة دائمة إذا كان سيُخزن فيها عمل حقيقي؛ قاعدة Render المجانية تنتهي بعد 30 يومًا.
+GitHub هو مستودع المصدر. ينشر Netlify الملفات الثابتة من `frontend/`، بينما يشغّل PythonAnywhere تطبيق Django وPostgreSQL على نطاق `mjdkhaled1.pythonanywhere.com`. ملف `netlify.toml` يحدد مجلد الواجهة للنشر. إعداد `frontend/runtime-config.js` يوجّه طلبات الإنتاج إلى API المنشور على PythonAnywhere، ويستخدم منفذ التطوير المحلي فقط عند فتح الواجهة على `localhost` أو `127.0.0.1`.
 
-عند إنشاء Blueprint، أدخل في `CORS_ORIGINS` الأصل الكامل فقط إذا كانت الواجهة على نطاق منفصل؛ لـGitHub Pages استخدم `https://YOUR_GITHUB_USERNAME.github.io` بلا مسار. عند استضافة الواجهة عبر خدمة Django نفسها اتركه فارغًا. وإذا استُخدم GitHub Pages، غيّر `frontend/runtime-config.js` إلى عنوان API المنشور بصيغة `https://YOUR_API_HOST.onrender.com/api/v1`.
+على PythonAnywhere، أنشئ تطبيق PostgreSQL وأدخل بيانات الاتصال في `DATABASE_URL`، واضبط المتغيرات من `.env.example` في ملف WSGI وبيئة أوامر Bash. لا ترفع ملف `.env` الحقيقي. PostgreSQL على PythonAnywhere يتطلب خطة مدفوعة تتضمن إضافة PostgreSQL.
 
-تتضمن إعدادات Render إنشاء `DJANGO_SECRET_KEY` تلقائيًا، وتشغيل migrations، وربط المنفذ الذي توفره Render عبر `PORT`. لا ترفع `.env` أو ملف قاعدة بيانات التطوير.
-
-بعد أول نشر، أنشئ حساب العميد في قاعدة الإنتاج من Render Shell بالأمر `python backend/manage.py createsuperuser`؛ حسابات قاعدة SQLite المحلية مستبعدة من الحزمة عمدًا.
+إذا أردت استخدام PythonAnywhere لاستضافة الواجهة أيضًا، يمكن تقديم `frontend/` والخادم من أصل واحد؛ حينها يمكن إزالة أصل Netlify من `CORS_ORIGINS` بعد نقل الواجهة. دليل الخطوات التفصيلي في `DEPLOYMENT.md`. إعداد `render.yaml` يبقى بديلًا لـRender ولا يستخدمه مسار النشر هذا.
 
 ## نطاق المرحلتين 4 و5 المنفذ
 

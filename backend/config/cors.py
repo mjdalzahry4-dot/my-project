@@ -10,7 +10,7 @@ class CorsMiddleware:
         self.get_response = get_response
 
     def __call__(self, request):
-        origin = request.headers.get("Origin", "").rstrip("/")
+        origin = request.headers.get("Origin", "").rstrip("/").lower()
         allowed = origin in settings.CORS_ALLOWED_ORIGINS
         if request.method == "OPTIONS" and allowed:
             response = HttpResponse(status=204)

@@ -34,7 +34,7 @@ if not ALLOWED_HOSTS or "*" in ALLOWED_HOSTS:
     raise ImproperlyConfigured("DJANGO_ALLOWED_HOSTS must contain explicit host names and cannot contain '*'.")
 
 CORS_ALLOWED_ORIGINS = {
-    origin.strip().rstrip("/")
+    origin.strip().rstrip("/").lower()
     for origin in os.environ.get("CORS_ORIGINS", os.environ.get("CORS_ALLOWED_ORIGINS", "")).split(",")
     if origin.strip()
 }

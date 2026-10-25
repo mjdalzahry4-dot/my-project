@@ -1,4 +1,4 @@
-# التهيئة للنشر — Render وبيئة إنتاج عامة
+# التهيئة للنشر — GitHub وNetlify وPythonAnywhere
 
 هذه الملفات تجهز الإعدادات وخطوات النشر، ولا تعني أن النظام نُشر أو أن بيئة إنتاج حقيقية جرى اختبارها. لا تستخدم `runserver` في الإنتاج.
 
@@ -12,7 +12,40 @@
 
 لم يُعرف مزود الاستضافة أو النطاق أو حجم البيانات، لذلك لا يمكن تقدير تكلفة موثوقة. التكلفة تعتمد على مزود التطبيق وقاعدة PostgreSQL والتخزين الاحتياطي والبريد/التنبيهات عند اعتمادها.
 
-## إعداد Render
+## الإعداد المستهدف
+
+GitHub مستودع للكود، وNetlify ينشر `frontend/` كواجهة ثابتة، وPythonAnywhere يشغّل Django مع PostgreSQL. GitHub Pages لا يشغّل Python/Django؛ لذلك لا يصلح وحده لاستضافة الخادم.
+
+1. ادفع المستودع إلى GitHub بعد ضبط remote لحسابك. لا ترفع `.env` أو `backend/db.sqlite3` أو أي نسخة احتياطية.
+2. اربط مستودع GitHub بخدمة Netlify، وحدد `frontend/` مجلدًا للنشر. يضبط `netlify.toml` هذا المسار تلقائيًا.
+3. على PythonAnywhere، أنشئ تطبيق ويب Django من تبويب Web، واربطه بمستودع GitHub وثبت المتطلبات من `backend/requirements.txt` داخل virtualenv.
+4. فعّل PostgreSQL من تبويب Databases وأنشئ قاعدة ومستخدم تطبيق مستقلًا، ثم أدخل بيانات المضيف والمنفذ واسم القاعدة والمستخدم في `DATABASE_URL`. PostgreSQL المدمج في PythonAnywhere متاح كإضافة للخطط المدفوعة.
+5. اضبط متغيرات البيئة في ملف WSGI الخاص بالتطبيق قبل استدعاء `get_wsgi_application`. ملف `.env.example` قالب توضيحي فقط؛ Django لا يحمّله تلقائيًا. ضع القيم الحقيقية في ملف WSGI على PythonAnywhere أو حمّل ملف أسرار خاصًا خارج Git. لا تضع أسرارًا حقيقية في المستودع.
+6. في ملف WSGI الذي يوفره تبويب Web، أضف المسار الفعلي إلى مجلد `backend` (المجلد الذي يحتوي `manage.py`) إلى `sys.path`، واضبط المتغيرات ثم استورد Django. مثال هيكلي، استبدل المسارات والقيم بقيم حسابك:
+
+   ```python
+   import os
+   import sys
+
+   sys.path.insert(0, "/home/USERNAME/PROJECT/backend")
+   os.environ["DJANGO_SETTINGS_MODULE"] = "config.settings_production"
+   os.environ["DJANGO_SECRET_KEY"] = "ضع_هنا_مفتاحًا_عشوائيًا_حقيقيًا_طويلًا"
+   os.environ["DJANGO_ALLOWED_HOSTS"] = "mjdkhaled1.pythonanywhere.com"
+   os.environ["CORS_ORIGINS"] = "https://mjdkhaled1.pythonanywhere.com,https://incandescent-stardust-31fbdc.netlify.app"
+   os.environ["DATABASE_URL"] = "postgresql://...بيانات_قاعدة_الإنتاج..."
+   os.environ["DATABASE_SSLMODE"] = "verify-full"
+
+   from django.core.wsgi import get_wsgi_application
+   application = get_wsgi_application()
+   ```
+
+   احتفظ ببيانات الاتصال والمفتاح سريين، ولا تنس ضبط المتغيرات نفسها في جلسة Bash عند تشغيل migrations و`collectstatic`. اتبع إرشادات PythonAnywhere لإعداد WSGI ومتغيرات التطبيق.
+7. نفذ migrations و`collectstatic` من Bash بعد تحميل متغيرات الإنتاج، ثم اربط `/static/` بمجلد `backend/staticfiles` من إعدادات Web وأعد تحميل التطبيق.
+8. أنشئ حساب العميد من Bash باستخدام `python backend/manage.py createsuperuser` بعد التأكد من أن `DATABASE_URL` يشير إلى قاعدة الإنتاج.
+
+`frontend/runtime-config.js` يرسل طلبات الواجهة المنشورة إلى API PythonAnywhere. إعدادات الإنتاج تسمح بأصول HTTPS المصرح بها في `CORS_ORIGINS` فقط، وتشتق منها `CSRF_TRUSTED_ORIGINS`. عناوين HTTP على localhost تبقى لإعداد التطوير المحلي.
+
+## إعداد Render البديل
 
 يوفر `render.yaml` إعداد Blueprint لخدمة Django واحدة تقدم الواجهة من `frontend/` وAPI ولوحة الإدارة من النطاق نفسه. ارفع المستودع، ثم أنشئ Blueprint في Render واختر المستودع. لا يحتوي الإعداد على قاعدة بيانات لتجنب إنشاء مورد مدفوع دون اختيارك؛ أنشئ PostgreSQL في Render، ثم أضف رابط الاتصال الداخلي إلى `DATABASE_URL`. اختر خطة مدفوعة لحفظ بيانات النظام على المدى الطويل؛ قواعد Render المجانية تنتهي بعد 30 يومًا. القيمة `DJANGO_SECRET_KEY` تُولّدها Render تلقائيًا.
 

@@ -1,4 +1,7 @@
-// Production serves the frontend and API from one origin. For local static
-// preview on port 8000, the Django development API uses port 8001.
-const localApiPort = window.location.port === '8000' ? ':8001' : '';
-window.GPMS_API_BASE_URL = `${window.location.protocol}//${window.location.hostname}${localApiPort}/api/v1`;
+// Local preview uses the development API. Deployed frontends (including
+// Netlify) call the public Django API on PythonAnywhere.
+const localHosts = new Set(['localhost', '127.0.0.1']);
+const isLocal = localHosts.has(window.location.hostname);
+window.GPMS_API_BASE_URL = isLocal
+  ? `${window.location.protocol}//${window.location.hostname}${window.location.port === '8000' ? ':8001' : ''}/api/v1`
+  : 'https://mjdkhaled1.pythonanywhere.com/api/v1';
