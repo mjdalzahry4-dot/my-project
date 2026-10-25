@@ -20,10 +20,11 @@ async function apiRequest(path, options = {}) {
   const headers = new Headers(options.headers || {});
   if (options.body && !headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
   if (!['GET', 'HEAD', 'OPTIONS'].includes(method)) {
-    let csrf;
-    try { csrf = await fetch(`${API_BASE}/auth/csrf/`, { credentials: 'include' }); }
-    catch (_) { throw new Error('تعذر الاتصال بالخادم. شغّل واجهة API على المنفذ 8001 وتحقق من الاتصال المحلي.'); }
-    if (!csrf.ok) throw new Error('تعذر تهيئة حماية الطلب. تحقق من تشغيل الخادم وإعدادات الاتصال.');
+    // إضافة التوكن إلى الطلبات
+const token = localStorage.getItem('authToken');
+if (token) {
+    headers.set('Authorization', `Token ${token}`);
+}
     const csrfData = await csrf.json();
     state.csrfToken = csrfData.csrfToken || '';
     if (state.csrfToken) headers.set('X-CSRFToken', state.csrfToken);
