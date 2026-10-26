@@ -38,8 +38,20 @@ async function apiRequest(path, options = {}) {
   if (response.status === 204) return null;
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
-    const detail = data.detail || Object.values(data).flat().find(value => typeof value === 'string') || 'تعذر إتمام العملية.';
-    throw new Error(Array.isArray(detail) ? detail.join(' ') : detail);
+    const labels = { group_code: 'رمز المجموعة', project_title: 'عنوان المشروع', project_description: 'وصف المشروع', academic_year: 'العام الدراسي', department_id: 'القسم', members: 'بيانات الطلاب', supervisor: 'بيانات المشرف', full_name: 'الاسم الكامل', username: 'اسم المستخدم', phone: 'رقم الجوال' };
+    const messages = [];
+    const collectMessages = value => {
+      if (typeof value === 'string') messages.push(value);
+      else if (Array.isArray(value)) value.forEach(collectMessages);
+      else if (value && typeof value === 'object') Object.values(value).forEach(collectMessages);
+    };
+    if (data.detail) collectMessages(data.detail);
+    else Object.entries(data).forEach(([field, value]) => {
+      const start = messages.length;
+      collectMessages(value);
+      if (messages.length > start) messages[start] = `${labels[field] || field}: ${messages[start]}`;
+    });
+    throw new Error(messages.join(' ') || 'تعذر إتمام العملية. راجع الحقول المطلوبة ثم أعد المحاولة.');
   }
   return data;
 }
@@ -189,6 +201,20 @@ wizardStepContent = function connectedWizardContent() {
   return `<h2>مراجعة الطلب</h2><p class="lead">راجع المعلومات قبل حفظ الطلب وإرساله إلى العميد.</p><div class="review-section"><div class="review-grid"><div class="review-item"><span>رمز المجموعة</span><strong>${esc(state.project.group)}</strong></div><div class="review-item"><span>العام الدراسي</span><strong>${esc(state.project.year)}</strong></div><div class="review-item"><span>عنوان المشروع</span><strong>${esc(state.project.title)}</strong></div><div class="review-item"><span>القسم</span><strong>${esc(state.departments.find(item => item.id === state.project.departmentId)?.name || '')}</strong></div><div class="review-item full"><span>الوصف</span><strong>${esc(state.project.desc)}</strong></div></div></div><div class="review-section"><strong>الأعضاء (${state.students.length})</strong>${state.students.map(student => `<div class="review-member">${esc(student.name)} · ${esc(student.username)} · ${esc(student.phone)}</div>`).join('')}</div><div class="review-section"><strong>المشرف الأكاديمي</strong><div class="review-member">${state.supervisorType === 'existing' ? esc(state.supervisors.find(item => item.id === state.selectedSupervisor)?.full_name || '') : esc(state.supervisor.name)}</div></div><div class="notice warn">سيُحفظ الطلب كمسودة على الخادم ثم يرسل للعميد عند التأكيد.</div>`;
 };
 
+const originalValidateStep = validateStep;
+validateStep = function validateConnectedStep() {
+  if (!originalValidateStep()) return false;
+  if (state.step === 0) {
+    const project = readProject();
+    if (!project.year.trim()) { toast('أدخل العام الدراسي قبل المتابعة.', 'error'); return false; }
+    if (!UUID_PATTERN.test(project.departmentId || '')) { toast('اختر القسم العلمي من القائمة قبل المتابعة.', 'error'); return false; }
+  }
+  if (state.step === 2 && state.supervisorType === 'existing' && !UUID_PATTERN.test(selectedSupervisorId())) {
+    toast('اختر مشرفًا مسجلًا صالحًا أو اختر إضافة مشرف جديد.', 'error'); return false;
+  }
+  return true;
+};
+
 genericPage = function connectedGenericPage() {
   const titles = { drafts: 'المسودات المحفوظة', projects: 'المشاريع المسندة إليك', deliverables: 'التقارير والتسليمات', notes: 'الملاحظات', project: 'تفاصيل مشروعي', calendar: 'المواعيد القادمة', groups: 'المجموعات', users: 'المستخدمون', audit: 'سجل العمليات' };
   let content = '<div class="empty-state">لا توجد بيانات متاحة لهذا الحساب.</div>';
@@ -235,6 +261,7 @@ window.addEventListener('resize', () => { if (state.departmentMenuOpen) position
 async function submitRealRequest() {
   try {
     const project = readProject();
+    if (!project.year.trim()) throw new Error('العام الدراسي حقل مطلوب. أدخله قبل متابعة إرسال الطلب.');
     if (!UUID_PATTERN.test(project.departmentId || '')) {
       throw new Error('القسم غير محدد أو أن معرّفه غير صالح. حدّث الصفحة ثم اختر القسم من القائمة.');
     }
