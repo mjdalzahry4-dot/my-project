@@ -40,16 +40,16 @@ GitHub مستودع للكود، وNetlify ينشر `frontend/` كواجهة ث�
    ```
 
    احتفظ ببيانات الاتصال والمفتاح سريين، ولا تنس ضبط المتغيرات نفسها في جلسة Bash عند تشغيل migrations و`collectstatic`. اتبع إرشادات PythonAnywhere لإعداد WSGI ومتغيرات التطبيق.
-7. نفذ migrations و`collectstatic` من Bash بعد تحميل متغيرات الإنتاج، ثم اربط `/static/` بمجلد `backend/staticfiles` من إعدادات Web وأعد تحميل التطبيق.
+7. نفذ migrations و`collectstatic` من Bash بعد تحميل متغيرات الإنتاج. يتضمن `migrate` إنشاء جدول `rest_framework.authtoken` المستخدم لرموز الدخول. اربط `/static/` بمجلد `backend/staticfiles` من إعدادات Web وأعد تحميل التطبيق.
 8. أنشئ حساب العميد من Bash باستخدام `python backend/manage.py createsuperuser` بعد التأكد من أن `DATABASE_URL` يشير إلى قاعدة الإنتاج.
 
-`frontend/runtime-config.js` يرسل طلبات الواجهة المنشورة إلى API PythonAnywhere. إعدادات الإنتاج تسمح بأصول HTTPS المصرح بها في `CORS_ORIGINS` فقط، وتشتق منها `CSRF_TRUSTED_ORIGINS`. عناوين HTTP على localhost تبقى لإعداد التطوير المحلي.
+`frontend/runtime-config.js` يرسل طلبات الواجهة المنشورة إلى API PythonAnywhere. تسجيل الدخول يعيد رمز DRF مؤقتًا (12 ساعة) ترسله الواجهة لاحقًا بترويسة `Authorization: Token ...`؛ لا تعتمد الواجهة على ملفات تعريف ارتباط الطرف الثالث. إعدادات الإنتاج تسمح بأصول HTTPS المصرح بها في `CORS_ORIGINS` فقط، وتسمح بترويسة Authorization في طلبات CORS. `CSRF_TRUSTED_ORIGINS` يبقى مضبوطًا لصفحات Django الإدارية. عناوين HTTP على localhost تبقى لإعداد التطوير المحلي.
 
 ## إعداد Render البديل
 
 يوفر `render.yaml` إعداد Blueprint لخدمة Django واحدة تقدم الواجهة من `frontend/` وAPI ولوحة الإدارة من النطاق نفسه. ارفع المستودع، ثم أنشئ Blueprint في Render واختر المستودع. لا يحتوي الإعداد على قاعدة بيانات لتجنب إنشاء مورد مدفوع دون اختيارك؛ أنشئ PostgreSQL في Render، ثم أضف رابط الاتصال الداخلي إلى `DATABASE_URL`. اختر خطة مدفوعة لحفظ بيانات النظام على المدى الطويل؛ قواعد Render المجانية تنتهي بعد 30 يومًا. القيمة `DJANGO_SECRET_KEY` تُولّدها Render تلقائيًا.
 
-عند مطالبة Blueprint بقيمة `CORS_ORIGINS`، اتركها فارغة عند استخدام نطاق خدمة Django نفسه للواجهة وAPI. إذا استخدمت GitHub Pages أو نطاق واجهة منفصلًا، أدخل الأصل الدقيق مثل `https://YOUR_GITHUB_USERNAME.github.io` دون مسار. عند GitHub Pages، حدّث `frontend/runtime-config.js` بعنوان API العام. إعداد الإنتاج يستخدم SameSite=None مع Secure لملفات الجلسة وCSRF فقط عند تهيئة أصل CORS منفصل.
+عند مطالبة Blueprint بقيمة `CORS_ORIGINS`، اتركها فارغة عند استخدام نطاق خدمة Django نفسه للواجهة وAPI. إذا استخدمت GitHub Pages أو نطاق واجهة منفصلًا، أدخل الأصل الدقيق مثل `https://YOUR_GITHUB_USERNAME.github.io` دون مسار. عند GitHub Pages، حدّث `frontend/runtime-config.js` بعنوان API العام. واجهة API تستخدم رمز وصول، بينما تبقى جلسات Django للوحة الإدارة فقط.
 
 ## إعداد عام
 

@@ -1,10 +1,9 @@
 from django.urls import path
 
-from .views import AuditListView, CsrfCookieView, DepartmentListView, GroupDetailView, GroupListView, GroupRequestDecisionView, GroupRequestDetailView, GroupRequestListCreateView, GroupRequestSubmitView, HealthView, LoginView, LogoutView, MeView, OneTimePasswordView, PasswordResetRequestView, ProjectDetailView, ProjectListView, ProjectNotesView, SupervisorListView
+from .views import AuditListView, DepartmentListView, GroupDetailView, GroupListView, GroupRequestDecisionView, GroupRequestDetailView, GroupRequestListCreateView, GroupRequestSubmitView, HealthView, LoginView, LogoutView, MeView, OneTimePasswordView, PasswordResetRequestView, ProjectDetailView, ProjectListView, ProjectNotesView, SupervisorListView
 
 urlpatterns = [
     path("health/", HealthView.as_view(), name="health"),
-    path("auth/csrf/", CsrfCookieView.as_view(), name="csrf-cookie"),
     path("auth/login/", LoginView.as_view(), name="login"),
     path("auth/logout/", LogoutView.as_view(), name="logout"),
     path("auth/me/", MeView.as_view(), name="me"),

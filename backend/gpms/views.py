@@ -1,18 +1,16 @@
-from django.contrib.auth import login as auth_login, logout as auth_logout
 from django.contrib.auth.hashers import check_password, make_password
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import transaction
 from django.shortcuts import get_object_or_404
-from django.views.decorators.csrf import csrf_protect, ensure_csrf_cookie
 from django.utils.decorators import method_decorator
-from django.middleware.csrf import get_token
 from rest_framework import status
 from rest_framework.exceptions import NotFound, PermissionDenied, ValidationError
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.throttling import SimpleRateThrottle
 from rest_framework.views import APIView
+from rest_framework.authtoken.models import Token
 
 from .models import AuditLog, Department, GroupMember, GroupRequest, OneTimeToken, OutboxEvent, Project, ProjectGroup, ProjectNote, ProjectSupervisor, RequestDecision, RequestRevision, RequestSupervisor, User
 from .permissions import IsAuthenticatedActive, can_view_project, request_queryset_for
@@ -42,16 +40,6 @@ class PasswordResetThrottle(SimpleRateThrottle):
         return self.cache_format % {"scope": self.scope, "ident": ident}
 
 
-@method_decorator(ensure_csrf_cookie, name="dispatch")
-class CsrfCookieView(APIView):
-    authentication_classes = []
-    permission_classes = [AllowAny]
-
-    def get(self, request):
-        return Response({"detail": "CSRF cookie set.", "csrfToken": get_token(request)})
-
-
-@method_decorator(csrf_protect, name="dispatch")
 class LoginView(APIView):
     authentication_classes = []
     permission_classes = [AllowAny]
@@ -65,10 +53,14 @@ class LoginView(APIView):
         password_ok = check_password(password, encoded)
         if not user or not password_ok or not user.is_active or user.account_status != User.AccountStatus.ACTIVE:
             return Response({"detail": "بيانات الدخول غير صحيحة."}, status=status.HTTP_400_BAD_REQUEST)
-        request.session.cycle_key()
-        auth_login(request, user)
-        audit(user, "auth.login", "user", user.id)
-        return Response({"user": user_payload(user)})
+        with transaction.atomic():
+            user = User.objects.select_for_update().get(pk=user.pk)
+            if not user.is_active or user.account_status != User.AccountStatus.ACTIVE:
+                return Response({"detail": "بيانات الدخول غير صحيحة."}, status=status.HTTP_400_BAD_REQUEST)
+            Token.objects.filter(user=user).delete()
+            token = Token.objects.create(user=user)
+            audit(user, "auth.login", "user", user.id)
+        return Response({"token": token.key, "user": user_payload(user)})
 
 
 class LogoutView(APIView):
@@ -76,7 +68,8 @@ class LogoutView(APIView):
 
     def post(self, request):
         audit(request.user, "auth.logout", "user", request.user.id)
-        auth_logout(request)
+        if request.auth is not None:
+            request.auth.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
@@ -155,6 +148,7 @@ class OneTimePasswordView(APIView):
             user.save(update_fields=["password", "account_status", "is_active", "updated_at"])
         else:
             user.save(update_fields=["password", "updated_at"])
+        Token.objects.filter(user=user).delete()
         audit(user, "account.activated" if purpose == OneTimeToken.Purpose.ACTIVATE else "auth.password_reset", "user", user.id)
         return Response({"detail": "تم تحديث بيانات الحساب."})
 

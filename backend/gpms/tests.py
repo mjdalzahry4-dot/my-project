@@ -46,7 +46,7 @@ class GpmsApiTests(TestCase):
 
     def test_anonymous_request_is_rejected(self):
         response = self.client.get("/api/v1/group-requests/")
-        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.status_code, 401)
 
     def test_login_is_case_insensitive_and_inactive_accounts_cannot_login(self):
         response = self.client.post("/api/v1/auth/login/", {"identifier": "CHAIR.DEMO", "password": "ChairPassword-Long-97!"}, format="json")

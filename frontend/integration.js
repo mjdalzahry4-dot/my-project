@@ -6,7 +6,7 @@ state.apiUser = null;
 state.departments = [];
 state.supervisors = [];
 state.apiError = '';
-state.csrfToken = '';
+state.apiToken = readStoredApiToken();
 state.projects = [];
 state.groups = [];
 state.auditEvents = [];
@@ -19,28 +19,40 @@ async function apiRequest(path, options = {}) {
   const method = (options.method || 'GET').toUpperCase();
   const headers = new Headers(options.headers || {});
   if (options.body && !headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
-  if (!['GET', 'HEAD', 'OPTIONS'].includes(method)) {
-    let csrf;
-    try { csrf = await fetch(`${API_BASE}/auth/csrf/`, { credentials: 'include' }); }
-    catch (_) { throw new Error('تعذر الاتصال بالخادم. شغّل واجهة API على المنفذ 8001 وتحقق من الاتصال المحلي.'); }
-    if (!csrf.ok) throw new Error('تعذر تهيئة حماية الطلب. تحقق من تشغيل الخادم وإعدادات الاتصال.');
-    const csrfData = await csrf.json();
-    state.csrfToken = csrfData.csrfToken || '';
-    if (state.csrfToken) headers.set('X-CSRFToken', state.csrfToken);
-  }
+  if (state.apiToken && !headers.has('Authorization')) headers.set('Authorization', `Token ${state.apiToken}`);
   let response;
   try {
-    response = await fetch(`${API_BASE}${path}`, { ...options, method, headers, credentials: 'include' });
+    response = await fetch(`${API_BASE}${path}`, { ...options, method, headers, credentials: 'omit' });
   } catch (error) {
-    throw new Error('تعذر الاتصال بالخادم. شغّل واجهة API على المنفذ 8001 وتحقق من الاتصال المحلي.');
+    throw new Error('تعذر الاتصال بالخادم. تحقق من رابط API وإعدادات الاستضافة.');
   }
   if (response.status === 204) return null;
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
+    if (response.status === 401 && state.apiToken && !path.endsWith('/auth/login/')) clearStoredApiToken();
     const detail = data.detail || Object.values(data).flat().find(value => typeof value === 'string') || 'تعذر إتمام العملية.';
     throw new Error(Array.isArray(detail) ? detail.join(' ') : detail);
   }
   return data;
+}
+
+function readStoredApiToken() {
+  try { return window.sessionStorage?.getItem('gpms_api_token') || ''; }
+  catch (_) { return ''; }
+}
+
+function saveStoredApiToken(token) {
+  state.apiToken = token;
+  try {
+    if (token) window.sessionStorage?.setItem('gpms_api_token', token);
+    else window.sessionStorage?.removeItem('gpms_api_token');
+  } catch (_) { /* The in-memory token still works until this tab is closed. */ }
+}
+
+function clearStoredApiToken() {
+  saveStoredApiToken('');
+  state.apiUser = null;
+  state.role = null;
 }
 
 function safeDate(value) {
@@ -257,7 +269,7 @@ document.addEventListener('click', async event => {
   if (action === 'logout') {
     event.preventDefault(); event.stopImmediatePropagation();
     try { await apiRequest('/auth/logout/', { method: 'POST', body: '{}' }); } catch (_) { /* انقطع الاتصال؛ نمسح الحالة المحلية على أي حال. */ }
-    state.apiUser = null; state.role = null; state.page = 'overview'; state.modal = null; login(); return;
+    clearStoredApiToken(); state.page = 'overview'; state.modal = null; login(); return;
   }
   if (action === 'new-group') {
     event.preventDefault(); event.stopImmediatePropagation();
@@ -313,20 +325,23 @@ document.addEventListener('submit', async event => {
     const button = event.target.querySelector('[type="submit"]');
     button.disabled = true; button.textContent = 'جارٍ التحقق…';
     try {
-      const user = await apiRequest('/auth/login/', { method: 'POST', body: JSON.stringify({ identifier: document.querySelector('#login-user').value.trim(), password: document.querySelector('#login-password').value }) });
-      startAsAuthenticated(user.user);
+      const result = await apiRequest('/auth/login/', { method: 'POST', body: JSON.stringify({ identifier: document.querySelector('#login-user').value.trim(), password: document.querySelector('#login-password').value }) });
+      if (!result.token || !result.user) throw new Error('استجابة تسجيل الدخول من الخادم غير مكتملة.');
+      saveStoredApiToken(result.token);
+      startAsAuthenticated(result.user);
     } catch (error) {
       state.apiError = error.message; login(); toast(error.message, 'error');
     }
   }
 }, true);
 
-(async function restoreSession() {
+(async function restoreTokenLogin() {
   try {
     const result = await apiRequest('/auth/me/');
     startAsAuthenticated(result.user);
   } catch (error) {
-    state.apiError = error.message.includes('الاتصال بالخادم') ? error.message : '';
+    if (error.message.includes('الاتصال بالخادم')) state.apiError = error.message;
+    else if (!state.apiToken) state.apiError = '';
     login();
   }
 })();
