@@ -125,6 +125,7 @@ const originalRender = render;
 render = function connectedRender() {
   originalRender();
   if (!state.role) return;
+  if (state.departmentMenuOpen) positionDepartmentMenu();
   const pills = document.querySelectorAll('.topbar .demo-pill');
   pills.forEach(pill => { pill.textContent = state.apiError ? 'تعذر الاتصال' : 'متصل بالخادم'; });
   const name = document.querySelector('.profile-name');
@@ -182,7 +183,7 @@ detailPage = function connectedDetailPage() {
 };
 
 wizardStepContent = function connectedWizardContent() {
-  if (state.step === 0) return `<h2>بيانات المجموعة والمشروع</h2><p class="lead">أدخل المعلومات الأساسية للطلب.</p><div class="form-grid"><div class="field"><label for="group-name">رمز المجموعة *</label><input id="group-name" placeholder="مثال: CS-2026-01" value="${esc(state.project.group)}" required /></div><div class="field"><label for="academic-year">العام الدراسي *</label><input id="academic-year" value="${esc(state.project.year)}" required /></div><div class="field full"><label for="project-title">عنوان المشروع المقترح *</label><input id="project-title" value="${esc(state.project.title)}" required /></div><div class="field full"><label for="project-desc">وصف المشروع وأهدافه الأولية *</label><textarea id="project-desc" required>${esc(state.project.desc)}</textarea></div><div class="field full"><label for="department">القسم العلمي *</label><select id="department">${state.departments.map(department => `<option value="${esc(department.id)}" ${state.project.departmentId === department.id ? 'selected' : ''}>${esc(department.name)}</option>`).join('')}</select></div></div>`;
+  if (state.step === 0) return `<h2>بيانات المجموعة والمشروع</h2><p class="lead">أدخل المعلومات الأساسية للطلب.</p><div class="form-grid"><div class="field"><label for="group-name">رمز المجموعة *</label><input id="group-name" placeholder="مثال: CS-2026-01" value="${esc(state.project.group)}" required /></div><div class="field"><label for="academic-year">العام الدراسي *</label><input id="academic-year" value="${esc(state.project.year)}" required /></div><div class="field full"><label for="project-title">عنوان المشروع المقترح *</label><input id="project-title" value="${esc(state.project.title)}" required /></div><div class="field full"><label for="project-desc">وصف المشروع وأهدافه الأولية *</label><textarea id="project-desc" required>${esc(state.project.desc)}</textarea></div><div class="field full department-picker-field"><label id="department-label" for="department-picker">القسم العلمي *</label><button id="department-picker" class="department-picker-trigger" type="button" role="combobox" aria-haspopup="listbox" aria-controls="department-options" aria-expanded="${state.departmentMenuOpen ? 'true' : 'false'}" aria-labelledby="department-label" data-action="toggle-department-menu"><span>${esc(state.departments.find(item => item.id === state.project.departmentId)?.name || 'اختر القسم العلمي')}</span><span aria-hidden="true">▾</span></button><input type="hidden" id="department" value="${esc(state.project.departmentId || '')}" /><div class="department-picker-menu ${state.departmentMenuOpen ? 'is-open' : ''}" id="department-options" role="listbox" aria-labelledby="department-label">${state.departments.length ? state.departments.map(department => `<button type="button" class="department-picker-option ${state.project.departmentId === department.id ? 'is-selected' : ''}" role="option" aria-selected="${state.project.departmentId === department.id}" data-action="select-department" data-department-id="${esc(department.id)}">${esc(department.name)}</button>`).join('') : '<div class="department-picker-empty">لا توجد أقسام متاحة للاختيار.</div>'}</div></div></div>`;
   if (state.step === 1) return `<div class="panel-head"><div><h2>أعضاء المجموعة</h2><p class="lead">أضف بيانات الطلاب. ينشأ الحساب غير مفعل بعد الاعتماد.</p></div><button class="btn btn-soft btn-sm" data-action="add-student">＋ إضافة طالب</button></div><div id="students-list">${state.students.map((student, index) => `<div class="member-card"><div class="member-head"><div class="member-title"><span class="member-index">${index + 1}</span>بيانات الطالب ${index + 1}</div>${state.students.length > 1 ? `<button class="btn btn-danger btn-sm" data-action="remove-student" data-index="${index}">حذف</button>` : ''}</div><div class="form-grid"><div class="field"><label>الاسم الكامل *</label><input data-student="name" data-index="${index}" value="${esc(student.name)}" /></div><div class="field"><label>اسم المستخدم *</label><input data-student="username" data-index="${index}" value="${esc(student.username)}" /></div><div class="field"><label>رقم الجوال *</label><input data-student="phone" data-index="${index}" value="${esc(student.phone)}" inputmode="tel" /></div></div></div>`).join('')}</div>`;
   if (state.step === 2) return `<h2>المشرف الأكاديمي</h2><p class="lead">اختر مشرفًا مسجلًا أو أدخل بيانات مشرف جديد.</p><div class="choice-row"><label class="choice-card"><input type="radio" name="supervisor-type" value="existing" ${state.supervisorType === 'existing' ? 'checked' : ''} /><span><span class="choice-title">حساب مشرف موجود</span></span></label><label class="choice-card"><input type="radio" name="supervisor-type" value="new" ${state.supervisorType === 'new' ? 'checked' : ''} /><span><span class="choice-title">إضافة مشرف جديد</span></span></label></div>${state.supervisorType === 'existing' ? `<div class="form-grid"><div class="field full"><label for="supervisor-existing">اختر المشرف *</label><select id="supervisor-existing">${state.supervisors.map(supervisor => `<option value="${esc(supervisor.id)}" ${state.selectedSupervisor === supervisor.id ? 'selected' : ''}>${esc(supervisor.full_name)}${supervisor.department ? ` — ${esc(supervisor.department)}` : ''}</option>`).join('')}</select>${!state.supervisors.length ? '<span class="help">لا يوجد مشرفون نشطون متاحون لهذا القسم.</span>' : ''}</div></div>` : `<div class="form-grid"><div class="field"><label for="supervisor-name">اسم المشرف *</label><input id="supervisor-name" value="${esc(state.supervisor.name)}" /></div><div class="field"><label for="supervisor-username">اسم المستخدم *</label><input id="supervisor-username" value="${esc(state.supervisor.username)}" /></div><div class="field"><label for="supervisor-phone">رقم الجوال *</label><input id="supervisor-phone" value="${esc(state.supervisor.phone)}" /></div><div class="field"><label for="supervisor-email">البريد الإلكتروني</label><input id="supervisor-email" type="email" value="${esc(state.supervisor.email)}" /></div><div class="field full"><label for="supervisor-specialty">التخصص</label><input id="supervisor-specialty" value="${esc(state.supervisor.specialty)}" /></div></div>`}`;
   return `<h2>مراجعة الطلب</h2><p class="lead">راجع المعلومات قبل حفظ الطلب وإرساله إلى العميد.</p><div class="review-section"><div class="review-grid"><div class="review-item"><span>رمز المجموعة</span><strong>${esc(state.project.group)}</strong></div><div class="review-item"><span>العام الدراسي</span><strong>${esc(state.project.year)}</strong></div><div class="review-item"><span>عنوان المشروع</span><strong>${esc(state.project.title)}</strong></div><div class="review-item"><span>القسم</span><strong>${esc(state.departments.find(item => item.id === state.project.departmentId)?.name || '')}</strong></div><div class="review-item full"><span>الوصف</span><strong>${esc(state.project.desc)}</strong></div></div></div><div class="review-section"><strong>الأعضاء (${state.students.length})</strong>${state.students.map(student => `<div class="review-member">${esc(student.name)} · ${esc(student.username)} · ${esc(student.phone)}</div>`).join('')}</div><div class="review-section"><strong>المشرف الأكاديمي</strong><div class="review-member">${state.supervisorType === 'existing' ? esc(state.supervisors.find(item => item.id === state.selectedSupervisor)?.full_name || '') : esc(state.supervisor.name)}</div></div><div class="notice warn">سيُحفظ الطلب كمسودة على الخادم ثم يرسل للعميد عند التأكيد.</div>`;
@@ -205,6 +206,31 @@ genericPage = function connectedGenericPage() {
 };
 
 function selectedSupervisorId() { return state.selectedSupervisor || state.supervisors[0]?.id || ''; }
+
+function positionDepartmentMenu() {
+  const trigger = document.querySelector('#department-picker');
+  const menu = document.querySelector('#department-options');
+  if (!trigger || !menu || !state.departmentMenuOpen) return;
+  const rect = trigger.getBoundingClientRect();
+  const height = Math.min(320, Math.max(48, state.departments.length * 46 + 8), window.innerHeight - 24);
+  const roomBelow = window.innerHeight - rect.bottom - 12;
+  const roomAbove = rect.top - 12;
+  const openAbove = roomBelow < height && roomAbove > roomBelow;
+  const top = openAbove ? Math.max(12, rect.top - height - 6) : Math.min(window.innerHeight - height - 12, rect.bottom + 6);
+  menu.style.position = 'fixed';
+  menu.style.top = `${top}px`;
+  menu.style.left = `${Math.max(12, Math.min(rect.left, window.innerWidth - rect.width - 12))}px`;
+  menu.style.width = `${rect.width}px`;
+  menu.style.maxHeight = `${Math.max(48, Math.min(height, window.innerHeight - 24))}px`;
+}
+
+document.addEventListener('keydown', event => {
+  if (event.key !== 'Escape' || !state.departmentMenuOpen) return;
+  state.departmentMenuOpen = false;
+  document.querySelector('#department-options')?.classList.remove('is-open');
+  document.querySelector('#department-picker')?.setAttribute('aria-expanded', 'false');
+});
+window.addEventListener('resize', () => { if (state.departmentMenuOpen) positionDepartmentMenu(); });
 
 async function submitRealRequest() {
   try {
@@ -254,6 +280,11 @@ async function decideRealRequest() {
 }
 
 document.addEventListener('click', async event => {
+  if (state.departmentMenuOpen && !event.target.closest('.department-picker-field')) {
+    state.departmentMenuOpen = false;
+    document.querySelector('#department-options')?.classList.remove('is-open');
+    document.querySelector('#department-picker')?.setAttribute('aria-expanded', 'false');
+  }
   const pageButton = event.target.closest('[data-page]');
   if (pageButton) {
     event.preventDefault(); event.stopImmediatePropagation();
@@ -264,6 +295,19 @@ document.addEventListener('click', async event => {
   const actionButton = event.target.closest('[data-action]');
   if (!actionButton) return;
   const action = actionButton.dataset.action;
+  if (action === 'toggle-department-menu') {
+    event.preventDefault(); event.stopImmediatePropagation();
+    state.departmentMenuOpen = !state.departmentMenuOpen; render(); return;
+  }
+  if (action === 'select-department') {
+    event.preventDefault(); event.stopImmediatePropagation();
+    const department = state.departments.find(item => item.id === actionButton.dataset.departmentId);
+    if (department) {
+      state.project.departmentId = department.id;
+      state.project.department = department.name;
+    }
+    state.departmentMenuOpen = false; render(); return;
+  }
   if (action === 'logout') {
     event.preventDefault(); event.stopImmediatePropagation();
     try { await apiRequest('/auth/logout/', { method: 'POST', body: '{}' }); } catch (_) { /* انقطع الاتصال؛ نمسح الحالة المحلية على أي حال. */ }
