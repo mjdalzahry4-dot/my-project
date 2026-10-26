@@ -1,5 +1,6 @@
 /* واجهة المرحلة الخامسة: ربط الشاشة بواجهات GPMS الفعلية. */
 const API_BASE = (window.GPMS_API_BASE_URL || 'http://localhost:8001/api/v1').replace(/\/$/, '');
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const backendRoleToUi = { dean: 'dean', department_chair: 'chair', supervisor: 'supervisor', student: 'student' };
 const apiRoleLabels = { dean: ['عميد الكلية', 'رئيس النظام'], chair: ['رئيس القسم', 'رئيس القسم'], supervisor: ['المشرف الأكاديمي', 'مشرف أكاديمي'], student: ['الطالب', 'طالب'] };
 state.apiUser = null;
@@ -208,6 +209,12 @@ function selectedSupervisorId() { return state.selectedSupervisor || state.super
 async function submitRealRequest() {
   try {
     const project = readProject();
+    if (!UUID_PATTERN.test(project.departmentId || '')) {
+      throw new Error('القسم غير محدد أو أن معرّفه غير صالح. حدّث الصفحة ثم اختر القسم من القائمة.');
+    }
+    if (state.supervisorType === 'existing' && !UUID_PATTERN.test(selectedSupervisorId())) {
+      throw new Error('لا يوجد مشرف مسجل صالح للاختيار. اختر «إضافة مشرف جديد» وأكمل بياناته، أو أضف حساب مشرف أولًا.');
+    }
     const payload = {
       group_code: project.group.trim(), project_title: project.title.trim(), project_description: project.desc.trim(),
       academic_year: project.year.trim(), department_id: project.departmentId,
@@ -268,8 +275,10 @@ document.addEventListener('click', async event => {
     try {
       const [departments, supervisors] = await Promise.all([apiRequest('/departments/'), apiRequest('/supervisors/')]);
       state.departments = departments; state.supervisors = supervisors;
-      state.project = { group: '', title: '', desc: '', department: state.apiUser?.department?.name || '', departmentId: departments[0]?.id || '', year: '2026–2027' };
-      state.students = [emptyStudent()]; state.supervisorType = 'existing'; state.selectedSupervisor = supervisors[0]?.id || '';
+      const userDepartment = departments.find(department => department.id === state.apiUser?.department?.id);
+      const selectedDepartment = userDepartment || departments[0];
+      state.project = { group: '', title: '', desc: '', department: selectedDepartment?.name || '', departmentId: selectedDepartment?.id || '', year: '2026–2027' };
+      state.students = [emptyStudent()]; state.supervisorType = supervisors.length ? 'existing' : 'new'; state.selectedSupervisor = supervisors[0]?.id || '';
       state.supervisor = { name: '', username: '', phone: '', email: '', specialty: '' };
       state.step = 0; state.page = 'wizard'; state.modal = null; render();
     } catch (error) { state.apiError = error.message; render(); toast(error.message, 'error'); }
