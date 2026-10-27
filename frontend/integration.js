@@ -210,20 +210,6 @@ wizardStepContent = function connectedWizardContent() {
   return `<h2>مراجعة الطلب</h2><p class="lead">راجع المعلومات قبل حفظ الطلب وإرساله إلى العميد.</p><div class="review-section"><div class="review-grid"><div class="review-item"><span>رمز المجموعة</span><strong>${esc(state.project.group)}</strong></div><div class="review-item"><span>العام الدراسي</span><strong>${esc(state.project.year)}</strong></div><div class="review-item"><span>عنوان المشروع</span><strong>${esc(state.project.title)}</strong></div><div class="review-item"><span>القسم</span><strong>${esc(state.departments.find(item => item.id === state.project.departmentId)?.name || '')}</strong></div><div class="review-item full"><span>الوصف</span><strong>${esc(state.project.desc)}</strong></div></div></div><div class="review-section"><strong>الأعضاء (${state.students.length})</strong>${state.students.map(student => `<div class="review-member">${esc(student.name)} · ${esc(student.username)} · ${esc(student.phone)}</div>`).join('')}</div><div class="review-section"><strong>المشرف الأكاديمي</strong><div class="review-member">${state.supervisorType === 'existing' ? esc(state.supervisors.find(item => item.id === state.selectedSupervisor)?.full_name || '') : esc(state.supervisor.name)}</div></div><div class="notice warn">سيُحفظ الطلب كمسودة على الخادم ثم يرسل للعميد عند التأكيد.</div>`;
 };
 
-const originalValidateStep = validateStep;
-validateStep = function validateConnectedStep() {
-  if (!originalValidateStep()) return false;
-  if (state.step === 0) {
-    const project = readProject();
-    if (!project.year.trim()) { toast('أدخل العام الدراسي قبل المتابعة.', 'error'); return false; }
-    if (!UUID_PATTERN.test(project.departmentId || '')) { toast('اختر القسم العلمي من القائمة قبل المتابعة.', 'error'); return false; }
-  }
-  if (state.step === 2 && state.supervisorType === 'existing' && !UUID_PATTERN.test(selectedSupervisorId())) {
-    toast('اختر مشرفًا مسجلًا صالحًا أو اختر إضافة مشرف جديد.', 'error'); return false;
-  }
-  return true;
-};
-
 genericPage = function connectedGenericPage() {
   const titles = { drafts: 'المسودات المحفوظة', projects: 'المشاريع المسندة إليك', deliverables: 'التقارير والتسليمات', notes: 'الملاحظات', project: 'تفاصيل مشروعي', calendar: 'المواعيد القادمة', groups: 'المجموعات', users: 'المستخدمون', audit: 'سجل العمليات' };
   let content = '<div class="empty-state">لا توجد بيانات متاحة لهذا الحساب.</div>';
@@ -241,6 +227,35 @@ genericPage = function connectedGenericPage() {
 };
 
 function selectedSupervisorId() { return state.selectedSupervisor || state.supervisors[0]?.id || ''; }
+
+function validateRequestStep() {
+  if (state.step === 0) {
+    const project = readProject();
+    if (!project.group.trim() || !project.year.trim() || !project.title.trim() || !project.desc.trim()) {
+      toast('أكمل رمز المجموعة والعام الدراسي والعنوان والوصف قبل المتابعة.', 'error');
+      return false;
+    }
+    if (!UUID_PATTERN.test(project.departmentId || '')) {
+      toast('اختر القسم العلمي من القائمة قبل المتابعة.', 'error');
+      return false;
+    }
+  }
+  if (state.step === 1 && (!state.students.length || state.students.some(student => !student.name.trim() || !student.username.trim() || !student.phone.trim()))) {
+    toast('أكمل الاسم واسم المستخدم ورقم الجوال لكل طالب قبل المتابعة.', 'error');
+    return false;
+  }
+  if (state.step === 2) {
+    if (state.supervisorType === 'existing' && !UUID_PATTERN.test(selectedSupervisorId())) {
+      toast('اختر مشرفًا مسجلًا صالحًا أو اختر إضافة مشرف جديد.', 'error');
+      return false;
+    }
+    if (state.supervisorType === 'new' && (!state.supervisor.name.trim() || !state.supervisor.username.trim() || !state.supervisor.phone.trim())) {
+      toast('أكمل اسم المشرف واسم المستخدم ورقم الجوال قبل المتابعة.', 'error');
+      return false;
+    }
+  }
+  return true;
+}
 
 function positionDepartmentMenu() {
   const trigger = document.querySelector('#department-picker');
@@ -270,7 +285,7 @@ window.addEventListener('resize', () => { if (state.departmentMenuOpen) position
 async function submitRealRequest() {
   try {
     const project = readProject();
-    if (!project.year.trim()) throw new Error('العام الدراسي حقل مطلوب. أدخله قبل متابعة إرسال الطلب.');
+    if (!project.year.trim()) throw new Error('أدخل العام الدراسي قبل متابعة إرسال الطلب.');
     if (!UUID_PATTERN.test(project.departmentId || '')) {
       throw new Error('القسم غير محدد أو أن معرّفه غير صالح. حدّث الصفحة ثم اختر القسم من القائمة.');
     }
@@ -331,6 +346,18 @@ document.addEventListener('click', async event => {
   const actionButton = event.target.closest('[data-action]');
   if (!actionButton) return;
   const action = actionButton.dataset.action;
+  if (action === 'next-step') {
+    event.preventDefault(); event.stopImmediatePropagation();
+    readProject();
+    if (!validateRequestStep()) return;
+    if (state.step < 3) {
+      state.step += 1; render();
+    } else {
+      state.modal = { kind: 'submit', title: 'إرسال الطلب؟', message: 'سيُرسل الطلب إلى النظام للمراجعة.', confirm: 'إرسال' };
+      render();
+    }
+    return;
+  }
   if (action === 'toggle-department-menu') {
     event.preventDefault(); event.stopImmediatePropagation();
     state.departmentMenuOpen = !state.departmentMenuOpen; render(); return;

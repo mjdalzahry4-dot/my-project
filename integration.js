@@ -38,20 +38,8 @@ async function apiRequest(path, options = {}) {
   if (response.status === 204) return null;
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
-    const labels = { group_code: 'رمز المجموعة', project_title: 'عنوان المشروع', project_description: 'وصف المشروع', academic_year: 'العام الدراسي', department_id: 'القسم', members: 'بيانات الطلاب', supervisor: 'بيانات المشرف', full_name: 'الاسم الكامل', username: 'اسم المستخدم', phone: 'رقم الجوال' };
-    const messages = [];
-    const collectMessages = value => {
-      if (typeof value === 'string') messages.push(value);
-      else if (Array.isArray(value)) value.forEach(collectMessages);
-      else if (value && typeof value === 'object') Object.values(value).forEach(collectMessages);
-    };
-    if (data.detail) collectMessages(data.detail);
-    else Object.entries(data).forEach(([field, value]) => {
-      const start = messages.length;
-      collectMessages(value);
-      if (messages.length > start) messages[start] = `${labels[field] || field}: ${messages[start]}`;
-    });
-    throw new Error(messages.join(' ') || 'تعذر إتمام العملية. راجع الحقول المطلوبة ثم أعد المحاولة.');
+    const detail = data.detail || Object.values(data).flat().find(value => typeof value === 'string') || 'تعذر إتمام العملية.';
+    throw new Error(Array.isArray(detail) ? detail.join(' ') : detail);
   }
   return data;
 }
@@ -199,20 +187,6 @@ wizardStepContent = function connectedWizardContent() {
   if (state.step === 1) return `<div class="panel-head"><div><h2>أعضاء المجموعة</h2><p class="lead">أضف بيانات الطلاب. ينشأ الحساب غير مفعل بعد الاعتماد.</p></div><button class="btn btn-soft btn-sm" data-action="add-student">＋ إضافة طالب</button></div><div id="students-list">${state.students.map((student, index) => `<div class="member-card"><div class="member-head"><div class="member-title"><span class="member-index">${index + 1}</span>بيانات الطالب ${index + 1}</div>${state.students.length > 1 ? `<button class="btn btn-danger btn-sm" data-action="remove-student" data-index="${index}">حذف</button>` : ''}</div><div class="form-grid"><div class="field"><label>الاسم الكامل *</label><input data-student="name" data-index="${index}" value="${esc(student.name)}" /></div><div class="field"><label>اسم المستخدم *</label><input data-student="username" data-index="${index}" value="${esc(student.username)}" /></div><div class="field"><label>رقم الجوال *</label><input data-student="phone" data-index="${index}" value="${esc(student.phone)}" inputmode="tel" /></div></div></div>`).join('')}</div>`;
   if (state.step === 2) return `<h2>المشرف الأكاديمي</h2><p class="lead">اختر مشرفًا مسجلًا أو أدخل بيانات مشرف جديد.</p><div class="choice-row"><label class="choice-card"><input type="radio" name="supervisor-type" value="existing" ${state.supervisorType === 'existing' ? 'checked' : ''} /><span><span class="choice-title">حساب مشرف موجود</span></span></label><label class="choice-card"><input type="radio" name="supervisor-type" value="new" ${state.supervisorType === 'new' ? 'checked' : ''} /><span><span class="choice-title">إضافة مشرف جديد</span></span></label></div>${state.supervisorType === 'existing' ? `<div class="form-grid"><div class="field full"><label for="supervisor-existing">اختر المشرف *</label><select id="supervisor-existing">${state.supervisors.map(supervisor => `<option value="${esc(supervisor.id)}" ${state.selectedSupervisor === supervisor.id ? 'selected' : ''}>${esc(supervisor.full_name)}${supervisor.department ? ` — ${esc(supervisor.department)}` : ''}</option>`).join('')}</select>${!state.supervisors.length ? '<span class="help">لا يوجد مشرفون نشطون متاحون لهذا القسم.</span>' : ''}</div></div>` : `<div class="form-grid"><div class="field"><label for="supervisor-name">اسم المشرف *</label><input id="supervisor-name" value="${esc(state.supervisor.name)}" /></div><div class="field"><label for="supervisor-username">اسم المستخدم *</label><input id="supervisor-username" value="${esc(state.supervisor.username)}" /></div><div class="field"><label for="supervisor-phone">رقم الجوال *</label><input id="supervisor-phone" value="${esc(state.supervisor.phone)}" /></div><div class="field"><label for="supervisor-email">البريد الإلكتروني</label><input id="supervisor-email" type="email" value="${esc(state.supervisor.email)}" /></div><div class="field full"><label for="supervisor-specialty">التخصص</label><input id="supervisor-specialty" value="${esc(state.supervisor.specialty)}" /></div></div>`}`;
   return `<h2>مراجعة الطلب</h2><p class="lead">راجع المعلومات قبل حفظ الطلب وإرساله إلى العميد.</p><div class="review-section"><div class="review-grid"><div class="review-item"><span>رمز المجموعة</span><strong>${esc(state.project.group)}</strong></div><div class="review-item"><span>العام الدراسي</span><strong>${esc(state.project.year)}</strong></div><div class="review-item"><span>عنوان المشروع</span><strong>${esc(state.project.title)}</strong></div><div class="review-item"><span>القسم</span><strong>${esc(state.departments.find(item => item.id === state.project.departmentId)?.name || '')}</strong></div><div class="review-item full"><span>الوصف</span><strong>${esc(state.project.desc)}</strong></div></div></div><div class="review-section"><strong>الأعضاء (${state.students.length})</strong>${state.students.map(student => `<div class="review-member">${esc(student.name)} · ${esc(student.username)} · ${esc(student.phone)}</div>`).join('')}</div><div class="review-section"><strong>المشرف الأكاديمي</strong><div class="review-member">${state.supervisorType === 'existing' ? esc(state.supervisors.find(item => item.id === state.selectedSupervisor)?.full_name || '') : esc(state.supervisor.name)}</div></div><div class="notice warn">سيُحفظ الطلب كمسودة على الخادم ثم يرسل للعميد عند التأكيد.</div>`;
-};
-
-const originalValidateStep = validateStep;
-validateStep = function validateConnectedStep() {
-  if (!originalValidateStep()) return false;
-  if (state.step === 0) {
-    const project = readProject();
-    if (!project.year.trim()) { toast('أدخل العام الدراسي قبل المتابعة.', 'error'); return false; }
-    if (!UUID_PATTERN.test(project.departmentId || '')) { toast('اختر القسم العلمي من القائمة قبل المتابعة.', 'error'); return false; }
-  }
-  if (state.step === 2 && state.supervisorType === 'existing' && !UUID_PATTERN.test(selectedSupervisorId())) {
-    toast('اختر مشرفًا مسجلًا صالحًا أو اختر إضافة مشرف جديد.', 'error'); return false;
-  }
-  return true;
 };
 
 genericPage = function connectedGenericPage() {
