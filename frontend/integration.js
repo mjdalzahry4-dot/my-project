@@ -7,7 +7,7 @@ state.apiUser = null;
 state.departments = [];
 state.supervisors = [];
 state.apiError = '';
-state.apiToken = readStoredApiToken();
+state.csrfToken = '';
 state.projects = [];
 state.groups = [];
 state.auditEvents = [];
@@ -20,52 +20,28 @@ async function apiRequest(path, options = {}) {
   const method = (options.method || 'GET').toUpperCase();
   const headers = new Headers(options.headers || {});
   if (options.body && !headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
-  if (state.apiToken && !headers.has('Authorization')) headers.set('Authorization', `Token ${state.apiToken}`);
+  if (!['GET', 'HEAD', 'OPTIONS'].includes(method)) {
+    let csrf;
+    try { csrf = await fetch(`${API_BASE}/auth/csrf/`, { credentials: 'include' }); }
+    catch (_) { throw new Error('تعذر الاتصال بالخادم. شغّل واجهة API على المنفذ 8001 وتحقق من الاتصال المحلي.'); }
+    if (!csrf.ok) throw new Error('تعذر تهيئة حماية الطلب. تحقق من تشغيل الخادم وإعدادات الاتصال.');
+    const csrfData = await csrf.json();
+    state.csrfToken = csrfData.csrfToken || '';
+    if (state.csrfToken) headers.set('X-CSRFToken', state.csrfToken);
+  }
   let response;
   try {
-    response = await fetch(`${API_BASE}${path}`, { ...options, method, headers, credentials: 'omit' });
+    response = await fetch(`${API_BASE}${path}`, { ...options, method, headers, credentials: 'include' });
   } catch (error) {
-    throw new Error('تعذر الاتصال بالخادم. تحقق من رابط API وإعدادات الاستضافة.');
+    throw new Error('تعذر الاتصال بالخادم. شغّل واجهة API على المنفذ 8001 وتحقق من الاتصال المحلي.');
   }
   if (response.status === 204) return null;
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
-    if (response.status === 401 && state.apiToken && !path.endsWith('/auth/login/')) clearStoredApiToken();
-    const labels = { group_code: 'رمز المجموعة', project_title: 'عنوان المشروع', project_description: 'وصف المشروع', academic_year: 'العام الدراسي', department_id: 'القسم', members: 'بيانات الطلاب', supervisor: 'بيانات المشرف', full_name: 'الاسم الكامل', username: 'اسم المستخدم', phone: 'رقم الجوال' };
-    const messages = [];
-    const collectMessages = value => {
-      if (typeof value === 'string') messages.push(value);
-      else if (Array.isArray(value)) value.forEach(collectMessages);
-      else if (value && typeof value === 'object') Object.values(value).forEach(collectMessages);
-    };
-    if (data.detail) collectMessages(data.detail);
-    else Object.entries(data).forEach(([field, value]) => {
-      const start = messages.length;
-      collectMessages(value);
-      if (messages.length > start) messages[start] = `${labels[field] || field}: ${messages[start]}`;
-    });
-    throw new Error(messages.join(' ') || 'تعذر إتمام العملية. راجع الحقول المطلوبة ثم أعد المحاولة.');
+    const detail = data.detail || Object.values(data).flat().find(value => typeof value === 'string') || 'تعذر إتمام العملية.';
+    throw new Error(Array.isArray(detail) ? detail.join(' ') : detail);
   }
   return data;
-}
-
-function readStoredApiToken() {
-  try { return window.sessionStorage?.getItem('gpms_api_token') || ''; }
-  catch (_) { return ''; }
-}
-
-function saveStoredApiToken(token) {
-  state.apiToken = token;
-  try {
-    if (token) window.sessionStorage?.setItem('gpms_api_token', token);
-    else window.sessionStorage?.removeItem('gpms_api_token');
-  } catch (_) { /* The in-memory token still works until this tab is closed. */ }
-}
-
-function clearStoredApiToken() {
-  saveStoredApiToken('');
-  state.apiUser = null;
-  state.role = null;
 }
 
 function safeDate(value) {
@@ -98,7 +74,7 @@ function uiRequest(item) {
 
 async function loadRequests() {
   const list = await apiRequest('/group-requests/');
-  serverRequests.splice(0, serverRequests.length, ...list.map(uiRequest));
+  demoRequests.splice(0, demoRequests.length, ...list.map(uiRequest));
 }
 
 async function loadPageData() {
@@ -158,7 +134,10 @@ render = function connectedRender() {
 
 const originalWizard = wizard;
 wizard = function connectedWizard() {
-  return originalWizard();
+  return originalWizard()
+    .replace('مسودة تجريبية', 'طلب محفوظ على الخادم عند الإرسال')
+    .replace('حفظ كمسودة والخروج', 'إلغاء الطلب')
+    .replace('لا تحفظ هذه المسودة خارج جلسة المعاينة. لا تُنشأ حسابات أو عضويات حقيقية.', 'يُحفظ الطلب على الخادم عند الإرسال، ولا تُنشأ حسابات الأعضاء إلا بعد الاعتماد.');
 };
 
 modalMarkup = function connectedModalMarkup() {
@@ -173,9 +152,9 @@ modalMarkup = function connectedModalMarkup() {
 };
 
 dashboard = function connectedDashboard() {
-  const pending = serverRequests.filter(item => item.status === 'pending').length;
-  const approved = serverRequests.filter(item => item.status === 'approved').length;
-  const recent = serverRequests.slice(0, 5);
+  const pending = demoRequests.filter(item => item.status === 'pending').length;
+  const approved = demoRequests.filter(item => item.status === 'approved').length;
+  const recent = demoRequests.slice(0, 5);
   const lead = state.apiUser?.display_name || state.apiUser?.username || roles[state.role].name;
   const rows = recent.length ? requestRows(recent) : '<div class="empty-state">لا توجد طلبات مسجلة حتى الآن.</div>';
   const primaryAction = state.role === 'chair' ? '<button class="btn btn-teal" data-action="new-group">＋ إنشاء مجموعة</button>' : '<button class="btn btn-outline" data-page="requests">عرض الطلبات <span>←</span></button>';
@@ -183,17 +162,17 @@ dashboard = function connectedDashboard() {
 };
 
 requestRows = function connectedRequestRows(rows) {
-  return rows.map(item => `<div class="request-row"><div><div class="request-name">${esc(item.title)}</div><div class="request-meta">${esc(item.code)} · ${esc(item.department)}</div></div><div><span class="request-status-extra">${item.members} طلاب</span><div class="request-meta">${esc(item.date)}</div></div><div>${statusPill(item.status)}</div><button class="btn btn-outline btn-sm" data-action="open-request" data-index="${serverRequests.indexOf(item)}">التفاصيل</button></div>`).join('');
+  return rows.map(item => `<div class="request-row"><div><div class="request-name">${esc(item.title)}</div><div class="request-meta">${esc(item.code)} · ${esc(item.department)}</div></div><div><span class="request-status-extra">${item.members} طلاب</span><div class="request-meta">${esc(item.date)}</div></div><div>${statusPill(item.status)}</div><button class="btn btn-outline btn-sm" data-action="open-request" data-index="${demoRequests.indexOf(item)}">التفاصيل</button></div>`).join('');
 };
 
 tablePage = function connectedTablePage() {
-  const rows = serverRequests.filter(item => (state.requestFilter === 'all' || item.status === state.requestFilter) && `${item.code} ${item.title} ${item.department}`.toLocaleLowerCase().includes(state.search.toLocaleLowerCase()));
+  const rows = demoRequests.filter(item => (state.requestFilter === 'all' || item.status === state.requestFilter) && `${item.code} ${item.title} ${item.department}`.toLocaleLowerCase().includes(state.search.toLocaleLowerCase()));
   const canCreate = state.role === 'chair' ? '<button class="btn btn-teal" data-action="new-group">＋ إنشاء مجموعة</button>' : '';
-  return `${connectionNotice()}<div class="welcome-row"><div><div class="eyebrow">${state.role === 'dean' ? 'مراجعة واعتماد' : 'طلبات القسم'}</div><h1>${currentTitle()}</h1><p>الطلبات المعروضة من قاعدة البيانات وبحسب صلاحية حسابك.</p></div>${canCreate}</div><section class="table-panel" style="padding:19px"><div class="panel-head"><div><h2 class="panel-title">كل الطلبات</h2><div class="panel-sub">${rows.length} طلبات</div></div><button class="btn btn-outline btn-sm" data-action="refresh-data">تحديث</button></div><div class="filters"><input type="search" id="request-search" value="${esc(state.search)}" placeholder="ابحث باسم المشروع أو الرقم..." aria-label="بحث الطلبات" /><select id="request-filter" aria-label="تصفية الحالة"><option value="all">كل الحالات</option>${Object.entries(statuses).filter(([key]) => !['active', 'draft'].includes(key)).map(([key, value]) => `<option value="${key}" ${state.requestFilter === key ? 'selected' : ''}>${value}</option>`).join('')}</select></div><div class="table-scroll"><table class="data-table"><thead><tr><th>رقم الطلب / المشروع</th><th>القسم</th><th>الأعضاء</th><th>المشرف</th><th>تاريخ الإرسال</th><th>الحالة</th><th>الإجراء</th></tr></thead><tbody>${rows.length ? rows.map(item => `<tr><td><div class="table-strong">${esc(item.title)}</div><small>${esc(item.code)}</small></td><td>${esc(item.department)}</td><td>${item.members}</td><td>${esc(item.supervisor)}</td><td>${esc(item.date)}</td><td>${statusPill(item.status)}</td><td><button class="btn btn-outline btn-sm" data-action="open-request" data-index="${serverRequests.indexOf(item)}">عرض الطلب</button></td></tr>`).join('') : '<tr><td colspan="7"><div class="empty-state">لا توجد طلبات تطابق البحث أو التصفية.</div></td></tr>'}</tbody></table></div>${connectionNotice()}</section>`;
+  return `${connectionNotice()}<div class="welcome-row"><div><div class="eyebrow">${state.role === 'dean' ? 'مراجعة واعتماد' : 'طلبات القسم'}</div><h1>${currentTitle()}</h1><p>الطلبات المعروضة من قاعدة البيانات وبحسب صلاحية حسابك.</p></div>${canCreate}</div><section class="table-panel" style="padding:19px"><div class="panel-head"><div><h2 class="panel-title">كل الطلبات</h2><div class="panel-sub">${rows.length} طلبات</div></div><button class="btn btn-outline btn-sm" data-action="refresh-data">تحديث</button></div><div class="filters"><input type="search" id="request-search" value="${esc(state.search)}" placeholder="ابحث باسم المشروع أو الرقم..." aria-label="بحث الطلبات" /><select id="request-filter" aria-label="تصفية الحالة"><option value="all">كل الحالات</option>${Object.entries(statuses).filter(([key]) => !['active', 'draft'].includes(key)).map(([key, value]) => `<option value="${key}" ${state.requestFilter === key ? 'selected' : ''}>${value}</option>`).join('')}</select></div><div class="table-scroll"><table class="data-table"><thead><tr><th>رقم الطلب / المشروع</th><th>القسم</th><th>الأعضاء</th><th>المشرف</th><th>تاريخ الإرسال</th><th>الحالة</th><th>الإجراء</th></tr></thead><tbody>${rows.length ? rows.map(item => `<tr><td><div class="table-strong">${esc(item.title)}</div><small>${esc(item.code)}</small></td><td>${esc(item.department)}</td><td>${item.members}</td><td>${esc(item.supervisor)}</td><td>${esc(item.date)}</td><td>${statusPill(item.status)}</td><td><button class="btn btn-outline btn-sm" data-action="open-request" data-index="${demoRequests.indexOf(item)}">عرض الطلب</button></td></tr>`).join('') : '<tr><td colspan="7"><div class="empty-state">لا توجد طلبات تطابق البحث أو التصفية.</div></td></tr>'}</tbody></table></div>${connectionNotice()}</section>`;
 };
 
 detailPage = function connectedDetailPage() {
-  const item = serverRequests[state.activeRequest];
+  const item = demoRequests[state.activeRequest];
   if (!item) return `${connectionNotice()}<div class="empty-state">تعذر العثور على الطلب. <button class="btn btn-outline" data-page="requests">العودة للطلبات</button></div>`;
   const revision = item.revision || {};
   const supervisor = item.supervisorDetail || {};
@@ -208,20 +187,6 @@ wizardStepContent = function connectedWizardContent() {
   if (state.step === 1) return `<div class="panel-head"><div><h2>أعضاء المجموعة</h2><p class="lead">أضف بيانات الطلاب. ينشأ الحساب غير مفعل بعد الاعتماد.</p></div><button class="btn btn-soft btn-sm" data-action="add-student">＋ إضافة طالب</button></div><div id="students-list">${state.students.map((student, index) => `<div class="member-card"><div class="member-head"><div class="member-title"><span class="member-index">${index + 1}</span>بيانات الطالب ${index + 1}</div>${state.students.length > 1 ? `<button class="btn btn-danger btn-sm" data-action="remove-student" data-index="${index}">حذف</button>` : ''}</div><div class="form-grid"><div class="field"><label>الاسم الكامل *</label><input data-student="name" data-index="${index}" value="${esc(student.name)}" /></div><div class="field"><label>اسم المستخدم *</label><input data-student="username" data-index="${index}" value="${esc(student.username)}" /></div><div class="field"><label>رقم الجوال *</label><input data-student="phone" data-index="${index}" value="${esc(student.phone)}" inputmode="tel" /></div></div></div>`).join('')}</div>`;
   if (state.step === 2) return `<h2>المشرف الأكاديمي</h2><p class="lead">اختر مشرفًا مسجلًا أو أدخل بيانات مشرف جديد.</p><div class="choice-row"><label class="choice-card"><input type="radio" name="supervisor-type" value="existing" ${state.supervisorType === 'existing' ? 'checked' : ''} /><span><span class="choice-title">حساب مشرف موجود</span></span></label><label class="choice-card"><input type="radio" name="supervisor-type" value="new" ${state.supervisorType === 'new' ? 'checked' : ''} /><span><span class="choice-title">إضافة مشرف جديد</span></span></label></div>${state.supervisorType === 'existing' ? `<div class="form-grid"><div class="field full"><label for="supervisor-existing">اختر المشرف *</label><select id="supervisor-existing">${state.supervisors.map(supervisor => `<option value="${esc(supervisor.id)}" ${state.selectedSupervisor === supervisor.id ? 'selected' : ''}>${esc(supervisor.full_name)}${supervisor.department ? ` — ${esc(supervisor.department)}` : ''}</option>`).join('')}</select>${!state.supervisors.length ? '<span class="help">لا يوجد مشرفون نشطون متاحون لهذا القسم.</span>' : ''}</div></div>` : `<div class="form-grid"><div class="field"><label for="supervisor-name">اسم المشرف *</label><input id="supervisor-name" value="${esc(state.supervisor.name)}" /></div><div class="field"><label for="supervisor-username">اسم المستخدم *</label><input id="supervisor-username" value="${esc(state.supervisor.username)}" /></div><div class="field"><label for="supervisor-phone">رقم الجوال *</label><input id="supervisor-phone" value="${esc(state.supervisor.phone)}" /></div><div class="field"><label for="supervisor-email">البريد الإلكتروني</label><input id="supervisor-email" type="email" value="${esc(state.supervisor.email)}" /></div><div class="field full"><label for="supervisor-specialty">التخصص</label><input id="supervisor-specialty" value="${esc(state.supervisor.specialty)}" /></div></div>`}`;
   return `<h2>مراجعة الطلب</h2><p class="lead">راجع المعلومات قبل حفظ الطلب وإرساله إلى العميد.</p><div class="review-section"><div class="review-grid"><div class="review-item"><span>رمز المجموعة</span><strong>${esc(state.project.group)}</strong></div><div class="review-item"><span>العام الدراسي</span><strong>${esc(state.project.year)}</strong></div><div class="review-item"><span>عنوان المشروع</span><strong>${esc(state.project.title)}</strong></div><div class="review-item"><span>القسم</span><strong>${esc(state.departments.find(item => item.id === state.project.departmentId)?.name || '')}</strong></div><div class="review-item full"><span>الوصف</span><strong>${esc(state.project.desc)}</strong></div></div></div><div class="review-section"><strong>الأعضاء (${state.students.length})</strong>${state.students.map(student => `<div class="review-member">${esc(student.name)} · ${esc(student.username)} · ${esc(student.phone)}</div>`).join('')}</div><div class="review-section"><strong>المشرف الأكاديمي</strong><div class="review-member">${state.supervisorType === 'existing' ? esc(state.supervisors.find(item => item.id === state.selectedSupervisor)?.full_name || '') : esc(state.supervisor.name)}</div></div><div class="notice warn">سيُحفظ الطلب كمسودة على الخادم ثم يرسل للعميد عند التأكيد.</div>`;
-};
-
-const originalValidateStep = validateStep;
-validateStep = function validateConnectedStep() {
-  if (!originalValidateStep()) return false;
-  if (state.step === 0) {
-    const project = readProject();
-    if (!project.year.trim()) { toast('أدخل العام الدراسي قبل المتابعة.', 'error'); return false; }
-    if (!UUID_PATTERN.test(project.departmentId || '')) { toast('اختر القسم العلمي من القائمة قبل المتابعة.', 'error'); return false; }
-  }
-  if (state.step === 2 && state.supervisorType === 'existing' && !UUID_PATTERN.test(selectedSupervisorId())) {
-    toast('اختر مشرفًا مسجلًا صالحًا أو اختر إضافة مشرف جديد.', 'error'); return false;
-  }
-  return true;
 };
 
 genericPage = function connectedGenericPage() {
@@ -270,7 +235,6 @@ window.addEventListener('resize', () => { if (state.departmentMenuOpen) position
 async function submitRealRequest() {
   try {
     const project = readProject();
-    if (!project.year.trim()) throw new Error('العام الدراسي حقل مطلوب. أدخله قبل متابعة إرسال الطلب.');
     if (!UUID_PATTERN.test(project.departmentId || '')) {
       throw new Error('القسم غير محدد أو أن معرّفه غير صالح. حدّث الصفحة ثم اختر القسم من القائمة.');
     }
@@ -292,7 +256,7 @@ async function submitRealRequest() {
     const submitted = await apiRequest(`/group-requests/${created.id}/submit/`, { method: 'POST', body: JSON.stringify({ version: created.version }) });
     state.draftRequestId = null;
     await loadRequests();
-    state.activeRequest = serverRequests.findIndex(item => item.id === submitted.id);
+    state.activeRequest = demoRequests.findIndex(item => item.id === submitted.id);
     state.page = 'detail'; state.modal = null; render();
     toast('تم حفظ الطلب وإرساله إلى العميد.');
   } catch (error) {
@@ -301,7 +265,7 @@ async function submitRealRequest() {
 }
 
 async function decideRealRequest() {
-  const item = serverRequests[state.activeRequest];
+  const item = demoRequests[state.activeRequest];
   const modal = state.modal;
   if (!item || !modal) return;
   const note = document.querySelector('#modal-note')?.value.trim() || '';
@@ -310,7 +274,7 @@ async function decideRealRequest() {
     const action = { approved: 'approve', returned: 'return', rejected: 'reject' }[modal.kind];
     await apiRequest(`/group-requests/${item.id}/${action}/`, { method: 'POST', body: JSON.stringify({ note }) });
     await loadRequests();
-    state.activeRequest = serverRequests.findIndex(entry => entry.id === item.id);
+    state.activeRequest = demoRequests.findIndex(entry => entry.id === item.id);
     state.modal = null; render(); toast('تم حفظ القرار في النظام.');
   } catch (error) { state.apiError = error.message; render(); toast(error.message, 'error'); }
 }
@@ -347,8 +311,9 @@ document.addEventListener('click', async event => {
   if (action === 'logout') {
     event.preventDefault(); event.stopImmediatePropagation();
     try { await apiRequest('/auth/logout/', { method: 'POST', body: '{}' }); } catch (_) { /* انقطع الاتصال؛ نمسح الحالة المحلية على أي حال. */ }
-    clearStoredApiToken(); state.page = 'overview'; state.modal = null; login(); return;
+    state.apiUser = null; state.role = null; state.page = 'overview'; state.modal = null; login(); return;
   }
+  if (action === 'demo-login') { event.preventDefault(); event.stopImmediatePropagation(); return; }
   if (action === 'new-group') {
     event.preventDefault(); event.stopImmediatePropagation();
     try {
@@ -405,23 +370,20 @@ document.addEventListener('submit', async event => {
     const button = event.target.querySelector('[type="submit"]');
     button.disabled = true; button.textContent = 'جارٍ التحقق…';
     try {
-      const result = await apiRequest('/auth/login/', { method: 'POST', body: JSON.stringify({ identifier: document.querySelector('#login-user').value.trim(), password: document.querySelector('#login-password').value }) });
-      if (!result.token || !result.user) throw new Error('استجابة تسجيل الدخول من الخادم غير مكتملة.');
-      saveStoredApiToken(result.token);
-      startAsAuthenticated(result.user);
+      const user = await apiRequest('/auth/login/', { method: 'POST', body: JSON.stringify({ identifier: document.querySelector('#login-user').value.trim(), password: document.querySelector('#login-password').value }) });
+      startAsAuthenticated(user.user);
     } catch (error) {
       state.apiError = error.message; login(); toast(error.message, 'error');
     }
   }
 }, true);
 
-(async function restoreTokenLogin() {
+(async function restoreSession() {
   try {
     const result = await apiRequest('/auth/me/');
     startAsAuthenticated(result.user);
   } catch (error) {
-    if (error.message.includes('الاتصال بالخادم')) state.apiError = error.message;
-    else if (!state.apiToken) state.apiError = '';
+    state.apiError = error.message.includes('الاتصال بالخادم') ? error.message : '';
     login();
   }
 })();
