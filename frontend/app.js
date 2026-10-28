@@ -77,14 +77,22 @@ function readProject() {
 function render() {
   if (!state.role) return login();
   const role = roles[state.role];
-  document.querySelector('#app').innerHTML = `<div class="shell"><aside class="sidebar" id="sidebar"><div class="side-brand"><div class="brand-lockup"><div class="brand-mark">ج</div><div><div class="brand-name">إدارة مشاريع التخرج</div><div class="brand-sub">GPMS · النظام الأكاديمي</div></div></div></div><div class="side-label">القائمة الرئيسية</div><nav class="side-nav">${navByRole[state.role].map(([id, icon, label]) => `<button class="nav-item ${state.page === id ? 'active' : ''}" data-page="${id}"><span class="nav-icon">${icon}</span>${label}</button>`).join('')}</nav><div class="side-bottom"><div class="profile-chip"><div class="avatar">${esc(role.initials)}</div><div><div class="profile-name">${esc(role.name)}</div><div class="profile-role">${role.label} · ${role.system}</div></div><button class="logout" data-action="logout" aria-label="تسجيل الخروج">↪</button></div></div></aside><div class="mobile-overlay" id="mobile-overlay" data-action="close-menu"></div><div class="main-wrap"><header class="topbar"><div><div class="top-title">${currentTitle()}</div><div class="breadcrumb">الرئيسية / ${currentTitle()}</div></div><div class="top-actions"><span class="top-date">${new Date().toLocaleDateString('ar-SA',{weekday:'long',year:'numeric',month:'long',day:'numeric'})}</span><span class="demo-pill">متصل بالخادم</span></div></header><main class="content">${pageContent()}</main></div>${modalMarkup()}</div>`;
+  document.querySelector('#app').innerHTML = `<div class="shell"><aside class="sidebar" id="sidebar"><div class="side-brand"><div class="brand-lockup"><div class="brand-mark">ج</div><div><div class="brand-name">إدارة مشاريع التخرج</div><div class="brand-sub">GPMS · النظام الأكاديمي</div></div></div></div><div class="side-label">القائمة الرئيسية</div><nav class="side-nav">${navByRole[state.role].map(([id, icon, label]) => `<button class="nav-item ${state.page === id ? 'active' : ''}" data-page="${id}"><span class="nav-icon">${icon}</span>${label}</button>`).join('')}</nav><div class="side-bottom"><div class="profile-chip"><div class="avatar">${esc(role.initials)}</div><div><div class="profile-name">${esc(role.name)}</div><div class="profile-role">${role.label} · ${role.system}</div></div><button class="logout" data-action="logout" aria-label="تسجيل الخروج">↪</button></div></div></aside><div class="mobile-overlay" id="mobile-overlay" data-action="close-menu"></div><div class="main-wrap"><header class="topbar"><button class="mobile-toggle" type="button" data-action="menu" aria-label="فتح القائمة" aria-expanded="false">☰</button><div><div class="top-title">${currentTitle()}</div><div class="breadcrumb">الرئيسية / ${currentTitle()}</div></div><div class="top-actions"><span class="top-date">${new Date().toLocaleDateString('ar-SA',{weekday:'long',year:'numeric',month:'long',day:'numeric'})}</span><span class="demo-pill">متصل بالخادم</span></div></header><main class="content">${pageContent()}</main></div>${modalMarkup()}</div>`;
 }
 
 document.addEventListener('click', event => {
   const action = event.target.closest('[data-action]')?.dataset.action;
   if (action === 'toggle-password') { const input = document.querySelector('#login-password'); if (input) input.type = input.type === 'password' ? 'text' : 'password'; }
-  if (action === 'menu') document.querySelector('#sidebar')?.classList.add('open');
-  if (action === 'close-menu') document.querySelector('#sidebar')?.classList.remove('open');
+  if (action === 'menu') {
+    document.querySelector('#sidebar')?.classList.add('open');
+    document.querySelector('#mobile-overlay')?.classList.add('show');
+    document.querySelector('.mobile-toggle')?.setAttribute('aria-expanded', 'true');
+  }
+  if (action === 'close-menu') {
+    document.querySelector('#sidebar')?.classList.remove('open');
+    document.querySelector('#mobile-overlay')?.classList.remove('show');
+    document.querySelector('.mobile-toggle')?.setAttribute('aria-expanded', 'false');
+  }
   if (action === 'open-request') { state.activeRequest = Number(event.target.closest('[data-action]').dataset.index); state.page = 'detail'; render(); }
   if (action === 'add-student') { state.students.push(emptyStudent()); render(); }
   if (action === 'remove-student') { state.students.splice(Number(event.target.closest('[data-action]').dataset.index), 1); render(); }

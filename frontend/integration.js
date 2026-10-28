@@ -457,6 +457,9 @@ document.addEventListener('click', async event => {
   const pageButton = event.target.closest('[data-page]');
   if (pageButton) {
     event.preventDefault(); event.stopImmediatePropagation();
+    document.querySelector('#sidebar')?.classList.remove('open');
+    document.querySelector('#mobile-overlay')?.classList.remove('show');
+    document.querySelector('.mobile-toggle')?.setAttribute('aria-expanded', 'false');
     state.page = pageButton.dataset.page; state.modal = null;
     if (state.page === 'detail') return render();
     await loadPageData(); render(); return;
