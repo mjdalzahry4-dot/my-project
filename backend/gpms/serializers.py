@@ -1,6 +1,6 @@
 from rest_framework import serializers
 
-from .models import Department, Deliverable, GroupMember, GroupRequest, Project, ProjectGroup, ProjectNote, ProjectSupervisor, RequestDecision, RequestMember, RequestRevision, RequestSupervisor, StudentProfile, SupervisorProfile, User
+from .models import Department, Deliverable, GroupMember, GroupRequest, Project, ProjectAppointment, ProjectGroup, ProjectNote, ProjectSupervisor, RequestDecision, RequestMember, RequestRevision, RequestSupervisor, StudentProfile, SupervisorProfile, User
 
 
 class DepartmentSerializer(serializers.ModelSerializer):
@@ -168,7 +168,43 @@ class ProjectReadSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Project
-        fields = ["id", "group", "title", "description", "status", "created_at", "completed_at"]
+        fields = ["id", "group", "title", "description", "repository_url", "status", "created_at", "completed_at"]
+
+
+class ProjectRepositorySerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Project
+        fields = ["repository_url"]
+
+    def validate_repository_url(self, value):
+        from urllib.parse import urlparse
+
+        value = value.strip()
+        if not value:
+            return ""
+        parsed = urlparse(value)
+        try:
+            port = parsed.port
+        except ValueError as exc:
+            raise serializers.ValidationError("رابط المنفذ غير صالح.") from exc
+        if parsed.scheme != "https" or parsed.hostname not in {"github.com", "www.github.com"} or parsed.username or parsed.password or port:
+            raise serializers.ValidationError("أدخل رابط مستودع GitHub يبدأ بـ https://github.com/.")
+        parts = [part for part in parsed.path.split("/") if part]
+        import re
+
+        if len(parts) != 2 or any(not re.fullmatch(r"[A-Za-z0-9_.-]+", part) or part in {".", ".."} for part in parts) or parsed.query or parsed.fragment:
+            raise serializers.ValidationError("يجب أن يشير الرابط إلى مستودع واحد بصيغة github.com/owner/repository.")
+        return f"https://github.com/{parts[0]}/{parts[1].removesuffix('.git')}"
+
+
+class ProjectAppointmentSerializer(serializers.ModelSerializer):
+    department = DepartmentSerializer(read_only=True)
+    project_title = serializers.CharField(source="project.title", read_only=True, allow_null=True)
+
+    class Meta:
+        model = ProjectAppointment
+        fields = ["id", "department", "project", "project_title", "title", "description", "starts_at", "created_at", "updated_at"]
+        read_only_fields = ["id", "department", "project_title", "created_at", "updated_at"]
 
 
 class ProjectNoteReadSerializer(serializers.ModelSerializer):

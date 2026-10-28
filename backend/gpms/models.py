@@ -208,10 +208,27 @@ class Project(UUIDModel):
     group = models.OneToOneField(ProjectGroup, on_delete=models.PROTECT, related_name="project")
     title = models.CharField(max_length=240)
     description = models.TextField()
+    repository_url = models.URLField(max_length=500, blank=True)
     status = models.CharField(max_length=12, choices=Status.choices, default=Status.ACTIVE, db_index=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     completed_at = models.DateTimeField(null=True, blank=True)
+
+
+class ProjectAppointment(UUIDModel):
+    """A department milestone or a project-specific meeting/deadline."""
+
+    department = models.ForeignKey(Department, on_delete=models.CASCADE, related_name="project_appointments")
+    project = models.ForeignKey(Project, null=True, blank=True, on_delete=models.CASCADE, related_name="appointments")
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="created_project_appointments")
+    title = models.CharField(max_length=180)
+    description = models.TextField(blank=True, max_length=2000)
+    starts_at = models.DateTimeField(db_index=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["starts_at", "title"]
 
 
 class GroupMember(UUIDModel):

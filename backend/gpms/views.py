@@ -5,10 +5,12 @@ from django.contrib.auth.hashers import check_password, make_password
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import transaction
+from django.db.models import Q
 from django.core.files.storage import default_storage
 from django.http import FileResponse
 from django.shortcuts import get_object_or_404
 from django.utils.decorators import method_decorator
+from django.utils import timezone
 from django.utils.http import content_disposition_header
 from rest_framework import status
 from rest_framework.exceptions import NotFound, PermissionDenied, ValidationError
@@ -19,11 +21,11 @@ from rest_framework.throttling import SimpleRateThrottle
 from rest_framework.views import APIView
 from rest_framework.authtoken.models import Token
 
-from .models import AuditLog, Department, Deliverable, GroupMember, GroupRequest, OneTimeToken, OutboxEvent, Project, ProjectGroup, ProjectNote, ProjectSupervisor, RequestDecision, RequestRevision, RequestSupervisor, User
+from .models import AuditLog, Department, Deliverable, GroupMember, GroupRequest, OneTimeToken, OutboxEvent, Project, ProjectAppointment, ProjectGroup, ProjectNote, ProjectSupervisor, RequestDecision, RequestRevision, RequestSupervisor, User
 from .permissions import IsAuthenticatedActive, can_view_project, request_queryset_for
-from .serializers import DepartmentSerializer, DeliverableReadSerializer, GroupDetailReadSerializer, GroupRequestReadSerializer, ProjectNoteReadSerializer, ProjectReadSerializer, RevisionInputSerializer
+from .serializers import DepartmentSerializer, DeliverableReadSerializer, GroupDetailReadSerializer, GroupRequestReadSerializer, ProjectAppointmentSerializer, ProjectNoteReadSerializer, ProjectReadSerializer, ProjectRepositorySerializer, RevisionInputSerializer
 from .services import Conflict, audit, create_request, decide_request, submit_request, update_request
-from .tokens import consume_token, get_valid_token
+from .tokens import consume_token, get_valid_token, issue_token
 
 DUMMY_PASSWORD_HASH = make_password("invalid-dummy-password-for-timing")
 
@@ -202,6 +204,22 @@ class UserListView(APIView):
         } for user in users])
 
 
+@method_decorator(transaction.atomic, name="dispatch")
+class StudentActivationView(APIView):
+    permission_classes = [IsAuthenticatedActive]
+
+    def post(self, request, user_id):
+        if request.user.role != User.Role.DEAN:
+            raise PermissionDenied("تفعيل حسابات الطلاب متاح لعميد الكلية فقط.")
+        user = get_object_or_404(User.objects.select_for_update(), id=user_id, role=User.Role.STUDENT)
+        if user.account_status != User.AccountStatus.ACTIVATION_PENDING:
+            raise ValidationError({"detail": "هذا الحساب ليس بانتظار التفعيل."})
+        user.one_time_tokens.filter(purpose=OneTimeToken.Purpose.ACTIVATE, used_at__isnull=True).update(used_at=timezone.now())
+        raw_token = issue_token(user, OneTimeToken.Purpose.ACTIVATE)
+        audit(request.user, "account.activation_issued", "user", user.id)
+        return Response({"activation_token": raw_token, "username": user.username, "expires_in_seconds": 3600})
+
+
 def input_data(request):
     serializer = RevisionInputSerializer(data=request.data)
     serializer.is_valid(raise_exception=True)
@@ -338,6 +356,93 @@ class ProjectDetailView(APIView):
         if not can_view_project(request.user, project):
             raise NotFound()
         return Response(ProjectReadSerializer(project).data)
+
+
+class ProjectRepositoryView(APIView):
+    permission_classes = [IsAuthenticatedActive]
+
+    def patch(self, request, project_id):
+        if request.user.role != User.Role.STUDENT:
+            raise PermissionDenied("تعديل رابط مستودع GitHub متاح لأعضاء المشروع من حساب الطالب.")
+        project = get_object_or_404(project_queryset_for(request.user), id=project_id)
+        if not can_view_project(request.user, project):
+            raise NotFound()
+        serializer = ProjectRepositorySerializer(project, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        audit(request.user, "project.repository_updated", "project", project.id)
+        return Response(ProjectReadSerializer(project).data)
+
+
+class ProjectAppointmentListCreateView(APIView):
+    permission_classes = [IsAuthenticatedActive]
+
+    def get_queryset(self, user):
+        qs = ProjectAppointment.objects.select_related("department", "project", "created_by")
+        if user.role == User.Role.DEAN:
+            return qs
+        if user.role == User.Role.DEPARTMENT_CHAIR:
+            return qs.filter(department_id=user.department_id) if user.department_id else qs.none()
+        if user.role == User.Role.SUPERVISOR:
+            project_ids = Project.objects.filter(supervisor_assignments__supervisor=user, supervisor_assignments__ended_at__isnull=True).values("id")
+            if user.department_id:
+                return qs.filter(Q(department_id=user.department_id) | Q(project_id__in=project_ids)).distinct()
+            return qs.filter(project_id__in=project_ids).distinct()
+        if user.role == User.Role.STUDENT:
+            project_ids = Project.objects.filter(group__members__student=user, group__members__left_at__isnull=True).values("id")
+            department_ids = ProjectGroup.objects.filter(members__student=user, members__left_at__isnull=True).values("department_id")
+            return qs.filter(department_id__in=department_ids).filter(Q(project__isnull=True) | Q(project_id__in=project_ids)).distinct()
+        return qs.none()
+
+    def get(self, request):
+        qs = self.get_queryset(request.user)
+        return Response(ProjectAppointmentSerializer(qs.filter(starts_at__gte=timezone.now()).order_by("starts_at")[:200], many=True).data)
+
+    def post(self, request):
+        if request.user.role not in {User.Role.DEAN, User.Role.DEPARTMENT_CHAIR}:
+            raise PermissionDenied("إنشاء المواعيد متاح للعميد ورئيس القسم.")
+        project_id = request.data.get("project") or None
+        project = None
+        if project_id:
+            project = get_object_or_404(project_queryset_for(request.user), id=project_id)
+            department = project.group.department
+        elif request.user.role == User.Role.DEPARTMENT_CHAIR:
+            if not request.user.department_id:
+                raise ValidationError({"department": "حساب رئيس القسم غير مرتبط بقسم."})
+            department = request.user.department
+        else:
+            department = get_object_or_404(Department, id=request.data.get("department_id"), is_active=True)
+        serializer = ProjectAppointmentSerializer(data={key: request.data.get(key) for key in ("title", "description", "starts_at")})
+        serializer.is_valid(raise_exception=True)
+        appointment = serializer.save(department=department, project=project, created_by=request.user)
+        audit(request.user, "appointment.created", "appointment", appointment.id)
+        return Response(ProjectAppointmentSerializer(appointment).data, status=status.HTTP_201_CREATED)
+
+
+class ProjectAppointmentDetailView(APIView):
+    permission_classes = [IsAuthenticatedActive]
+
+    def get_object(self, request, appointment_id):
+        if request.user.role not in {User.Role.DEAN, User.Role.DEPARTMENT_CHAIR}:
+            raise PermissionDenied("إدارة المواعيد متاحة للعميد ورئيس القسم.")
+        qs = ProjectAppointment.objects.select_related("department", "project", "created_by")
+        if request.user.role == User.Role.DEPARTMENT_CHAIR:
+            qs = qs.filter(department_id=request.user.department_id)
+        return get_object_or_404(qs, id=appointment_id)
+
+    def patch(self, request, appointment_id):
+        appointment = self.get_object(request, appointment_id)
+        serializer = ProjectAppointmentSerializer(appointment, data={key: request.data[key] for key in ("title", "description", "starts_at") if key in request.data}, partial=True)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        audit(request.user, "appointment.updated", "appointment", appointment.id)
+        return Response(ProjectAppointmentSerializer(appointment).data)
+
+    def delete(self, request, appointment_id):
+        appointment = self.get_object(request, appointment_id)
+        audit(request.user, "appointment.deleted", "appointment", appointment.id)
+        appointment.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class ProjectNotesView(APIView):

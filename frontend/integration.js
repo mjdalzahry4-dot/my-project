@@ -20,6 +20,14 @@ state.projectNotes = [];
 state.currentProjectId = null;
 state.projectDetail = null;
 state.deliverables = [];
+state.appointments = [];
+state.editingAppointmentId = null;
+state.activationLink = '';
+state.activationToken = (() => {
+  const match = String(window.location?.search || '').match(/[?&]activation=([^&]*)/);
+  try { return match ? decodeURIComponent(match[1].replace(/\+/g, ' ')) : ''; }
+  catch (_) { return ''; }
+})();
 
 async function apiRequest(path, options = {}) {
   const method = (options.method || 'GET').toUpperCase();
@@ -115,6 +123,16 @@ async function loadPageData() {
     if (['overview', 'requests', 'detail', 'drafts'].includes(state.page) && state.role !== 'student' && state.role !== 'supervisor') await loadRequests();
     if (['groups', 'overview'].includes(state.page)) state.groups = await apiRequest('/groups/');
     if (state.page === 'users' && state.role === 'dean') state.users = await apiRequest('/users/');
+    if (state.page === 'calendar') {
+      state.appointments = await apiRequest('/appointments/');
+      if (['dean', 'chair'].includes(state.role)) {
+        const required = [apiRequest('/projects/')];
+        if (state.role === 'dean') required.push(apiRequest('/departments/'));
+        const [projects, departments] = await Promise.all(required);
+        state.projects = projects;
+        if (departments) state.departments = departments;
+      }
+    }
     if (['projects', 'project', 'overview', 'notes'].includes(state.page)) {
       state.projects = await apiRequest('/projects/');
       if (['project', 'notes'].includes(state.page) && !state.currentProjectId) state.currentProjectId = state.projects[0]?.id || null;
@@ -142,6 +160,10 @@ function apiStatusName(value) {
 
 const originalLogin = login;
 login = function connectedLogin() {
+  if (state.activationToken) {
+    document.querySelector('#app').innerHTML = `<div class="login-page"><section class="login-art"><div class="brand-lockup"><div class="brand-mark">ج</div><div><div class="brand-name">إدارة مشاريع التخرج</div><div class="brand-sub">تفعيل حساب الطالب</div></div></div><div class="art-copy"><div class="eyebrow">خطوة أخيرة</div><h1>أنشئ كلمة مرورك<br>وابدأ مشروعك</h1><p>الرابط صالح لمرة واحدة ولمدة ساعة من إصداره.</p></div></section><section class="login-panel"><form class="login-box" id="activate-account-form"><div class="eyebrow">تفعيل آمن</div><h2>تعيين كلمة المرور</h2><div class="field"><label for="activation-password">كلمة مرور جديدة</label><input id="activation-password" type="password" autocomplete="new-password" minlength="12" required /><span class="help">استخدم 12 خانة على الأقل.</span></div><div class="field"><label for="activation-password-confirm">تأكيد كلمة المرور</label><input id="activation-password-confirm" type="password" autocomplete="new-password" minlength="12" required /></div>${connectionNotice()}<button type="submit" class="btn btn-primary btn-block">تفعيل الحساب</button></form></section></div>`;
+    return;
+  }
   document.querySelector('#app').innerHTML = `<div class="login-page"><section class="login-art"><div class="brand-lockup"><div class="brand-mark">ج</div><div><div class="brand-name">إدارة مشاريع التخرج</div><div class="brand-sub">Graduation Projects Management System</div></div></div><div class="art-copy"><div class="eyebrow">GPMS · بوابتك الأكاديمية</div><h1>من فكرة التخرج<br>إلى إنجاز يُفتخر به</h1><p>مساحة موحّدة تجمع الطالب والمشرف والقسم والكلية في رحلة المشروع.</p></div><div class="art-foot">اتصال آمن بالخادم · صلاحيات حسب الحساب</div></section><section class="login-panel"><form class="login-box" id="login-form"><div class="eyebrow">مرحبًا بك</div><h2>تسجيل الدخول</h2><p>استخدم اسم المستخدم وكلمة المرور المسجلين في النظام.</p><div class="field"><label for="login-user">اسم المستخدم</label><input id="login-user" autocomplete="username" placeholder="اسم المستخدم" required /></div><div class="field"><label for="login-password">كلمة المرور</label><div class="input-wrap"><input id="login-password" type="password" autocomplete="current-password" placeholder="كلمة المرور" required /><button type="button" class="ghost-eye" data-action="toggle-password">إظهار</button></div></div>${connectionNotice()}<button type="submit" class="btn btn-primary btn-block">تسجيل الدخول <span>←</span></button><p class="help">لا يُسمح باختيار الدور يدويًا؛ يحدد النظام الصلاحيات من الحساب.</p></form></section></div>`;
 };
 
@@ -246,6 +268,23 @@ wizardStepContent = function connectedWizardContent() {
   return `<h2>مراجعة الطلب</h2><p class="lead">راجع المعلومات قبل حفظ الطلب وإرساله إلى العميد.</p><div class="review-section"><div class="review-grid"><div class="review-item"><span>رمز المجموعة</span><strong>${esc(state.project.group)}</strong></div><div class="review-item"><span>العام الدراسي</span><strong>${esc(state.project.year)}</strong></div><div class="review-item"><span>عنوان المشروع</span><strong>${esc(state.project.title)}</strong></div><div class="review-item"><span>القسم</span><strong>${esc(state.departments.find(item => item.id === state.project.departmentId)?.name || '')}</strong></div><div class="review-item full"><span>الوصف</span><strong>${esc(state.project.desc)}</strong></div></div></div><div class="review-section"><strong>الأعضاء (${state.students.length})</strong>${state.students.map(student => `<div class="review-member">${esc(student.name)} · ${esc(student.username)} · ${esc(student.phone)}</div>`).join('')}</div><div class="review-section"><strong>المشرف الأكاديمي</strong><div class="review-member">${state.supervisorType === 'existing' ? esc(state.supervisors.find(item => item.id === state.selectedSupervisor)?.full_name || '') : esc(state.supervisor.name)}</div></div><div class="notice warn">سيُحفظ الطلب كمسودة على الخادم ثم يرسل للعميد عند التأكيد.</div>`;
 };
 
+function localDateTimeInput(value) {
+  if (!value) return '';
+  const date = new Date(value);
+  const pad = part => String(part).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+function calendarContent() {
+  const canManage = ['dean', 'chair'].includes(state.role);
+  const editing = state.appointments.find(item => item.id === state.editingAppointmentId);
+  const projectOptions = state.projects.map(project => `<option value="${esc(project.id)}" ${editing?.project === project.id ? 'selected' : ''}>${esc(project.title)} · ${esc(project.group.group_code)}</option>`).join('');
+  const departmentOptions = state.departments.map(department => `<option value="${esc(department.id)}" ${editing?.department?.id === department.id ? 'selected' : ''}>${esc(department.name)}</option>`).join('');
+  const form = canManage ? `<form id="appointment-form" class="form-grid" style="margin-bottom:20px"><div class="field"><label for="appointment-title">عنوان الموعد *</label><input id="appointment-title" maxlength="180" value="${esc(editing?.title || '')}" required placeholder="مثال: تسليم خطة المشروع" /></div><div class="field"><label for="appointment-start">التاريخ والوقت *</label><input id="appointment-start" type="datetime-local" value="${esc(localDateTimeInput(editing?.starts_at))}" required /></div>${state.role === 'dean' ? `<div class="field"><label for="appointment-department">القسم *</label><select id="appointment-department" ${editing?.project ? 'disabled' : ''} required><option value="">اختر القسم</option>${departmentOptions}</select></div>` : ''}<div class="field"><label for="appointment-project">مشروع محدد (اختياري)</label><select id="appointment-project"><option value="">موعد عام للقسم</option>${projectOptions}</select></div><div class="field full"><label for="appointment-description">التفاصيل</label><textarea id="appointment-description" maxlength="2000">${esc(editing?.description || '')}</textarea></div><div class="field full" style="display:flex;gap:8px;align-items:center"><button class="btn btn-teal" type="submit">${editing ? 'حفظ التعديلات' : 'إضافة الموعد'}</button>${editing ? '<button class="btn btn-outline" type="button" data-action="cancel-appointment-edit">إلغاء التعديل</button>' : ''}</div></form>` : '';
+  const items = state.appointments.length ? `<div class="request-list">${state.appointments.map(item => `<div class="request-row"><div><div class="request-name">${esc(item.title)}</div><div class="request-meta">${esc(item.department?.name || '')}${item.project_title ? ` · ${esc(item.project_title)}` : ' · موعد للقسم'}</div>${item.description ? `<div class="request-meta">${esc(item.description)}</div>` : ''}</div><div>${esc(new Date(item.starts_at).toLocaleString('ar-SA', { dateStyle: 'medium', timeStyle: 'short' }))}</div>${canManage ? `<div class="action-group"><button class="btn btn-outline btn-sm" data-action="edit-appointment" data-appointment-id="${esc(item.id)}">تعديل</button><button class="btn btn-danger btn-sm" data-action="delete-appointment" data-appointment-id="${esc(item.id)}">حذف</button></div>` : ''}</div>`).join('')}</div>` : '<div class="empty-state">لا توجد مواعيد قادمة. ستظهر هنا مراحل المشروع والاجتماعات التي يحددها القسم.</div>';
+  return `${form}${items}`;
+}
+
 genericPage = function connectedGenericPage() {
   const titles = { drafts: 'المسودات المحفوظة', projects: 'المشاريع المسندة إليك', deliverables: 'التقارير والتسليمات', notes: 'الملاحظات', project: 'تفاصيل مشروعي', calendar: 'المواعيد القادمة', groups: 'المجموعات', users: 'المستخدمون', audit: 'سجل العمليات' };
   let content = '<div class="empty-state">لا توجد بيانات متاحة لهذا الحساب.</div>';
@@ -258,7 +297,9 @@ genericPage = function connectedGenericPage() {
   if (state.page === 'audit' && state.auditEvents.length) content = `<div class="request-list">${state.auditEvents.map(event => `<div class="request-row"><div><div class="request-name">${esc(event.action)}</div><div class="request-meta">${esc(event.actor || 'النظام')} · ${esc(event.entity_type)}</div></div><div>${esc(safeDate(event.occurred_at))}</div></div>`).join('')}</div>`;
   if (state.page === 'project' && state.projectDetail) {
     const project = state.projectDetail;
-    content = `<div class="review-grid"><div class="review-item"><span>عنوان المشروع</span><strong>${esc(project.title)}</strong></div><div class="review-item"><span>رمز المجموعة</span><strong>${esc(project.group.group_code)}</strong></div><div class="review-item"><span>القسم</span><strong>${esc(project.group.department.name)}</strong></div><div class="review-item"><span>العام الدراسي</span><strong>${esc(project.group.academic_year)}</strong></div><div class="review-item full"><span>الوصف</span><strong>${esc(project.description)}</strong></div></div><button class="btn btn-teal" data-action="open-project-notes" data-project-id="${esc(project.id)}">عرض ملاحظات المشروع</button>`;
+    const repoEditor = state.role === 'student' ? `<form id="project-repository-form" class="field" style="margin:18px 0"><label for="project-repository-url">مستودع GitHub للفريق</label><input id="project-repository-url" type="url" value="${esc(project.repository_url || '')}" placeholder="https://github.com/owner/repository" /><span class="help">ضع رابط مستودع الفريق. اجعل المستودع خاصًا عند احتواء الشفرة على بيانات أو أسرار.</span><button class="btn btn-teal" type="submit" style="margin-top:10px">حفظ رابط المستودع</button></form>` : project.repository_url ? `<div class="review-item full"><span>مستودع GitHub</span><a href="${esc(project.repository_url)}" target="_blank" rel="noopener noreferrer">فتح المستودع ↗</a></div>` : '<div class="review-item full"><span>مستودع GitHub</span><strong>لم يضف الفريق رابطًا بعد.</strong></div>';
+    const repoLink = state.role === 'student' && project.repository_url ? `<p><a href="${esc(project.repository_url)}" target="_blank" rel="noopener noreferrer">فتح مستودع الفريق ↗</a></p>` : '';
+    content = `<div class="review-grid"><div class="review-item"><span>عنوان المشروع</span><strong>${esc(project.title)}</strong></div><div class="review-item"><span>رمز المجموعة</span><strong>${esc(project.group.group_code)}</strong></div><div class="review-item"><span>القسم</span><strong>${esc(project.group.department.name)}</strong></div><div class="review-item"><span>العام الدراسي</span><strong>${esc(project.group.academic_year)}</strong></div><div class="review-item full"><span>الوصف</span><strong>${esc(project.description)}</strong></div>${repoEditor}</div>${repoLink}<button class="btn btn-teal" data-action="open-project-notes" data-project-id="${esc(project.id)}">عرض ملاحظات المشروع</button>`;
   }
   if (state.page === 'notes' && state.currentProjectId) content = `${state.projectNotes.length ? `<div class="request-list">${state.projectNotes.map(note => `<div class="review-member"><strong>${esc(note.author_name)}</strong> · ${esc(safeDate(note.created_at))}<p>${esc(note.body)}</p></div>`).join('')}</div>` : '<div class="empty-state">لا توجد ملاحظات لهذا المشروع.</div>'}<form id="project-note-form" class="field" style="margin-top:18px"><label for="project-note-body">إضافة ملاحظة للفريق</label><textarea id="project-note-body" required maxlength="5000"></textarea><button class="btn btn-teal" type="submit" style="margin-top:10px">حفظ الملاحظة</button></form>`;
   if (state.page === 'notes' && !state.currentProjectId) content = '<div class="empty-state">لا توجد مشاريع مرتبطة بالحساب بعد.</div>';
@@ -275,14 +316,14 @@ genericPage = function connectedGenericPage() {
       content = `<div class="panel-head"><div><strong>${esc(project?.title || 'ملفات المشروع')}</strong><div class="panel-sub">${esc(project?.group?.group_code || '')}</div></div><button class="btn btn-outline btn-sm" data-action="refresh-data">تحديث</button></div>${upload}${items}`;
     }
   }
-  if (['calendar', 'users'].includes(state.page) || (state.page === 'notes' && !state.currentProjectId)) content = '<div class="empty-state">لا تتوفر بيانات لهذه الوظيفة أو لا يوجد مشروع مرتبط بالحساب.</div>';
-  if (state.page === 'calendar') content = '<div class="notice warn"><strong>لم يحدد القسم مواعيد تسليم بعد.</strong><p>ستظهر هنا المواعيد الرسمية ومراحل المشروع عند نشرها من إدارة القسم. إلى ذلك الوقت، تابع حالة المشروع وملفاته من «مشروعي» و«التسليمات».</p><button class="btn btn-outline btn-sm" data-page="project">مشاهدة مشروعي</button></div>';
+  if (state.page === 'calendar') content = calendarContent();
   if (state.page === 'users') {
     const search = state.userSearch.trim().toLocaleLowerCase();
     const filtered = state.users.filter(user => (state.userRoleFilter === 'all' || user.role === state.userRoleFilter) && `${user.username} ${user.display_name} ${user.department?.name || ''}`.toLocaleLowerCase().includes(search));
     const roleOptions = [...new Map(state.users.map(user => [user.role, user.role_label])).entries()];
     const statusLabels = { active: 'نشط', activation_pending: 'بانتظار تفعيل الحساب', pending_approval: 'بانتظار اعتماد المجموعة', disabled: 'موقوف' };
-    content = `<form id="users-filter-form" class="filters"><input type="search" id="users-search" value="${esc(state.userSearchInput)}" placeholder="ابحث بالاسم أو اسم المستخدم أو القسم" aria-label="بحث المستخدمين" /><select id="users-role-filter" aria-label="تصفية الدور"><option value="all">كل الأدوار</option>${roleOptions.map(([role, label]) => `<option value="${esc(role)}" ${state.userRoleFilter === role ? 'selected' : ''}>${esc(label)}</option>`).join('')}</select><button class="btn btn-outline btn-sm" type="submit">بحث</button><button class="btn btn-outline btn-sm" type="button" data-action="refresh-data">تحديث</button></form><div class="table-scroll"><table class="data-table"><thead><tr><th>الاسم</th><th>اسم المستخدم</th><th>الدور</th><th>القسم</th><th>حالة الحساب</th></tr></thead><tbody>${filtered.length ? filtered.map(user => `<tr><td>${esc(user.display_name)}</td><td>${esc(user.username)}</td><td>${esc(user.role_label)}</td><td>${esc(user.department?.name || '—')}</td><td>${esc(statusLabels[user.account_status] || user.account_status)}</td></tr>`).join('') : '<tr><td colspan="5"><div class="empty-state">لا يوجد مستخدمون يطابقون البحث.</div></td></tr>'}</tbody></table></div>`;
+    const activationNotice = state.activationLink ? `<div class="notice warn"><strong>رابط التفعيل (يظهر مرة واحدة، صالح لساعة):</strong><p>أرسله للطالب عبر قناة الجامعة المعتمدة.</p><input readonly value="${esc(state.activationLink)}" aria-label="رابط تفعيل الحساب" onclick="this.select()" /><button class="btn btn-outline btn-sm" type="button" data-action="copy-activation-link">نسخ الرابط</button></div>` : '';
+    content = `${activationNotice}<form id="users-filter-form" class="filters"><input type="search" id="users-search" value="${esc(state.userSearchInput)}" placeholder="ابحث بالاسم أو اسم المستخدم أو القسم" aria-label="بحث المستخدمين" /><select id="users-role-filter" aria-label="تصفية الدور"><option value="all">كل الأدوار</option>${roleOptions.map(([role, label]) => `<option value="${esc(role)}" ${state.userRoleFilter === role ? 'selected' : ''}>${esc(label)}</option>`).join('')}</select><button class="btn btn-outline btn-sm" type="submit">بحث</button><button class="btn btn-outline btn-sm" type="button" data-action="refresh-data">تحديث</button></form><div class="table-scroll"><table class="data-table"><thead><tr><th>الاسم</th><th>اسم المستخدم</th><th>الدور</th><th>القسم</th><th>حالة الحساب</th><th>الإجراء</th></tr></thead><tbody>${filtered.length ? filtered.map(user => `<tr><td>${esc(user.display_name)}</td><td>${esc(user.username)}</td><td>${esc(user.role_label)}</td><td>${esc(user.department?.name || '—')}</td><td>${esc(statusLabels[user.account_status] || user.account_status)}</td><td>${user.role === 'student' && user.account_status === 'activation_pending' ? `<button class="btn btn-teal btn-sm" data-action="issue-activation" data-user-id="${esc(user.id)}">تفعيل الحساب</button>` : '—'}</td></tr>`).join('') : '<tr><td colspan="6"><div class="empty-state">لا يوجد مستخدمون يطابقون البحث.</div></td></tr>'}</tbody></table></div>`;
   }
   return `${connectionNotice()}<div class="welcome-row"><div><div class="eyebrow">GPMS · بيانات الخادم</div><h1>${titles[state.page] || currentTitle()}</h1><p>المعلومات معروضة بحسب صلاحيات حسابك.</p></div></div><section class="panel">${content}</section>`;
 };
@@ -541,6 +582,45 @@ document.addEventListener('click', async event => {
   if (action === 'refresh-data') {
     event.preventDefault(); event.stopImmediatePropagation(); await loadPageData(); render(); toast('تم تحديث البيانات من الخادم.');
   }
+  if (action === 'issue-activation') {
+    event.preventDefault(); event.stopImmediatePropagation();
+    try {
+      const result = await apiRequest(`/users/${encodeURIComponent(actionButton.dataset.userId)}/activation/`, { method: 'POST', body: '{}' });
+      state.activationLink = `${window.location.origin}/?activation=${encodeURIComponent(result.activation_token)}`;
+      render(); toast('أُصدر رابط تفعيل صالح لساعة ولمرة واحدة.');
+    } catch (error) { state.apiError = error.message; render(); toast(error.message, 'error'); }
+    return;
+  }
+  if (action === 'copy-activation-link') {
+    event.preventDefault(); event.stopImmediatePropagation();
+    try {
+      await navigator.clipboard.writeText(state.activationLink);
+      toast('تم نسخ رابط التفعيل.');
+    } catch (_) {
+      const field = document.querySelector('[aria-label="رابط تفعيل الحساب"]');
+      field?.select();
+      toast('حدد الرابط وانسخه يدويًا.');
+    }
+    return;
+  }
+  if (action === 'edit-appointment') {
+    event.preventDefault(); event.stopImmediatePropagation();
+    state.editingAppointmentId = actionButton.dataset.appointmentId; render(); return;
+  }
+  if (action === 'cancel-appointment-edit') {
+    event.preventDefault(); event.stopImmediatePropagation(); state.editingAppointmentId = null; render(); return;
+  }
+  if (action === 'delete-appointment') {
+    event.preventDefault(); event.stopImmediatePropagation();
+    const appointment = state.appointments.find(item => item.id === actionButton.dataset.appointmentId);
+    if (appointment && window.confirm(`هل تريد حذف الموعد «${appointment.title}»؟`)) {
+      try {
+        await apiRequest(`/appointments/${encodeURIComponent(appointment.id)}/`, { method: 'DELETE' });
+        state.editingAppointmentId = null; await loadPageData(); render(); toast('تم حذف الموعد.');
+      } catch (error) { state.apiError = error.message; render(); toast(error.message, 'error'); }
+    }
+    return;
+  }
   if (action === 'open-project-notes') {
     event.preventDefault(); event.stopImmediatePropagation();
     state.currentProjectId = actionButton.dataset.projectId; state.page = 'notes';
@@ -562,6 +642,54 @@ document.addEventListener('change', event => {
 }, true);
 
 document.addEventListener('submit', async event => {
+  if (event.target.id === 'activate-account-form') {
+    event.preventDefault(); event.stopImmediatePropagation();
+    const password = document.querySelector('#activation-password')?.value || '';
+    const confirmation = document.querySelector('#activation-password-confirm')?.value || '';
+    if (password !== confirmation) { toast('كلمتا المرور غير متطابقتين.', 'error'); return; }
+    try {
+      await apiRequest('/auth/one-time-password/activate/', { method: 'POST', body: JSON.stringify({ token: state.activationToken, password }) });
+      state.activationToken = ''; state.apiError = '';
+      window.history.replaceState({}, document.title, window.location.pathname);
+      login(); toast('تم تفعيل الحساب. يمكنك تسجيل الدخول الآن.');
+    } catch (error) { state.apiError = error.message; login(); toast(error.message, 'error'); }
+    return;
+  }
+  if (event.target.id === 'appointment-form') {
+    event.preventDefault(); event.stopImmediatePropagation();
+    const localStart = document.querySelector('#appointment-start')?.value || '';
+    const startsAt = new Date(localStart);
+    if (!localStart || Number.isNaN(startsAt.getTime())) { toast('اختر تاريخًا ووقتًا صالحين.', 'error'); return; }
+    const payload = {
+      title: document.querySelector('#appointment-title')?.value.trim() || '',
+      description: document.querySelector('#appointment-description')?.value.trim() || '',
+      starts_at: startsAt.toISOString(),
+    };
+    const projectId = document.querySelector('#appointment-project')?.value;
+    const departmentId = document.querySelector('#appointment-department')?.value;
+    if (projectId) payload.project = projectId;
+    else if (state.role === 'dean') payload.department_id = departmentId;
+    try {
+      const editingId = state.editingAppointmentId;
+      await apiRequest(editingId ? `/appointments/${encodeURIComponent(editingId)}/` : '/appointments/', {
+        method: editingId ? 'PATCH' : 'POST', body: JSON.stringify(payload),
+      });
+      state.editingAppointmentId = null; await loadPageData(); render(); toast(editingId ? 'تم تحديث الموعد.' : 'تمت إضافة الموعد.');
+    } catch (error) { state.apiError = error.message; render(); toast(error.message, 'error'); }
+    return;
+  }
+  if (event.target.id === 'project-repository-form') {
+    event.preventDefault(); event.stopImmediatePropagation();
+    const repositoryUrl = document.querySelector('#project-repository-url')?.value.trim() || '';
+    try {
+      state.projectDetail = await apiRequest(`/projects/${encodeURIComponent(state.currentProjectId)}/repository/`, {
+        method: 'PATCH', body: JSON.stringify({ repository_url: repositoryUrl }),
+      });
+      state.projects = state.projects.map(project => project.id === state.projectDetail.id ? state.projectDetail : project);
+      render(); toast('تم حفظ رابط مستودع GitHub.');
+    } catch (error) { state.apiError = error.message; render(); toast(error.message, 'error'); }
+    return;
+  }
   if (event.target.id === 'request-filter-form') {
     event.preventDefault(); event.stopImmediatePropagation();
     state.search = document.querySelector('#request-search')?.value || '';

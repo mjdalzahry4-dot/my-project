@@ -8,7 +8,7 @@ from django.test import TestCase, override_settings
 from django.urls import reverse
 from rest_framework.test import APIClient
 
-from .models import AuditLog, Deliverable, Department, GroupMember, GroupRequest, OneTimeToken, OutboxEvent, Project, ProjectGroup, ProjectNote, ProjectSupervisor, RequestDecision, RequestSupervisor, StudentProfile, SupervisorProfile, User
+from .models import AuditLog, Deliverable, Department, GroupMember, GroupRequest, OneTimeToken, OutboxEvent, Project, ProjectAppointment, ProjectGroup, ProjectNote, ProjectSupervisor, RequestDecision, RequestSupervisor, StudentProfile, SupervisorProfile, User
 from .tokens import issue_token
 
 
@@ -73,6 +73,59 @@ class GpmsApiTests(TestCase):
         self.client.force_authenticate(self.chair)
         denied = self.client.get("/api/v1/users/")
         self.assertEqual(denied.status_code, 403)
+
+    def test_dean_issues_single_use_student_activation_link(self):
+        pending = User(username="student.awaiting", role=User.Role.STUDENT, account_status=User.AccountStatus.ACTIVATION_PENDING)
+        pending.set_unusable_password()
+        pending.save()
+        self.client.force_authenticate(self.chair)
+        self.assertEqual(self.client.post(f"/api/v1/users/{pending.id}/activation/", {}, format="json").status_code, 403)
+        self.client.force_authenticate(self.dean)
+        issued = self.client.post(f"/api/v1/users/{pending.id}/activation/", {}, format="json")
+        self.assertEqual(issued.status_code, 200, issued.data)
+        self.assertEqual(issued.data["username"], pending.username)
+        token = issued.data["activation_token"]
+        self.assertNotIn(token, OneTimeToken.objects.get(user=pending).token_hash)
+        self.assertEqual(issued.data["expires_in_seconds"], 3600)
+        activated = self.client.post("/api/v1/auth/one-time-password/activate/", {"token": token, "password": "A-long-unique-student-password-2026!"}, format="json")
+        self.assertEqual(activated.status_code, 200, activated.data)
+        pending.refresh_from_db()
+        self.assertEqual(pending.account_status, User.AccountStatus.ACTIVE)
+        self.assertTrue(pending.check_password("A-long-unique-student-password-2026!"))
+        self.assertEqual(self.client.post(f"/api/v1/users/{pending.id}/activation/", {}, format="json").status_code, 400)
+
+    def test_student_can_set_only_their_project_github_repository(self):
+        request_id = self.make_pending()
+        self.client.force_authenticate(self.dean)
+        self.client.post(f"/api/v1/group-requests/{request_id}/approve/", {}, format="json")
+        project = Project.objects.get(group__source_request_id=request_id)
+        student = User.objects.get(username="student.new")
+        student.account_status = User.AccountStatus.ACTIVE
+        student.save(update_fields=["account_status"])
+        self.client.force_authenticate(student)
+        saved = self.client.patch(f"/api/v1/projects/{project.id}/repository/", {"repository_url": "https://github.com/example-team/graduation-app.git"}, format="json")
+        self.assertEqual(saved.status_code, 200, saved.data)
+        self.assertEqual(saved.data["repository_url"], "https://github.com/example-team/graduation-app")
+        self.assertEqual(Project.objects.get(id=project.id).repository_url, saved.data["repository_url"])
+        rejected = self.client.patch(f"/api/v1/projects/{project.id}/repository/", {"repository_url": "https://example.com/repo"}, format="json")
+        self.assertEqual(rejected.status_code, 400)
+        outsider = User.objects.create_user(username="student.outside", password="StudentPassword-97!", role=User.Role.STUDENT)
+        self.client.force_authenticate(outsider)
+        self.assertEqual(self.client.patch(f"/api/v1/projects/{project.id}/repository/", {"repository_url": "https://github.com/example-team/other"}, format="json").status_code, 404)
+
+    def test_department_appointments_are_scoped_and_manageable(self):
+        self.client.force_authenticate(self.chair)
+        created = self.client.post("/api/v1/appointments/", {
+            "title": "موعد تسليم الخطة", "description": "رفع الخطة الأولية", "starts_at": "2027-01-15T09:00:00Z",
+        }, format="json")
+        self.assertEqual(created.status_code, 201, created.data)
+        self.assertEqual(created.data["department"]["id"], str(self.department.id))
+        self.assertEqual(self.client.get("/api/v1/appointments/").data[0]["title"], "موعد تسليم الخطة")
+        self.client.force_authenticate(self.other_chair)
+        self.assertEqual(self.client.get("/api/v1/appointments/").data, [])
+        self.assertEqual(self.client.patch(f"/api/v1/appointments/{created.data['id']}/", {"title": "تعديل غير مخول"}, format="json").status_code, 404)
+        self.client.force_authenticate(self.student)
+        self.assertEqual(self.client.post("/api/v1/appointments/", {"title": "موعد طالب", "starts_at": "2027-01-16T09:00:00Z"}, format="json").status_code, 403)
 
     def test_chair_can_create_and_submit_one_complete_request(self):
         self.client.force_authenticate(self.chair)

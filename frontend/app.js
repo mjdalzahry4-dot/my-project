@@ -6,9 +6,9 @@ const roles = {
 };
 const statuses = { pending: 'بانتظار اعتماد العميد', approved: 'معتمد', returned: 'معاد للتعديل', rejected: 'مرفوض', draft: 'مسودة', active: 'نشط' };
 const navByRole = {
-  dean: [['overview','▦','لوحة التحكم'],['requests','▤','طلبات الاعتماد'],['groups','◫','المجموعات'],['users','♙','المستخدمون'],['audit','◷','سجل العمليات']],
-  chair: [['overview','▦','لوحة التحكم'],['groups','◫','إدارة المجموعات'],['requests','▤','طلبات القسم'],['drafts','▧','المسودات']],
-  supervisor: [['overview','▦','لوحة المشرف'],['projects','◫','مشاريعي'],['deliverables','⇧','التقارير والتسليمات'],['notes','▤','الملاحظات']],
+  dean: [['overview','▦','لوحة التحكم'],['requests','▤','طلبات الاعتماد'],['groups','◫','المجموعات'],['calendar','▦','المواعيد'],['users','♙','المستخدمون'],['audit','◷','سجل العمليات']],
+  chair: [['overview','▦','لوحة التحكم'],['groups','◫','إدارة المجموعات'],['requests','▤','طلبات القسم'],['calendar','▦','المواعيد'],['drafts','▧','المسودات']],
+  supervisor: [['overview','▦','لوحة المشرف'],['projects','◫','مشاريعي'],['deliverables','⇧','التقارير والتسليمات'],['calendar','▦','المواعيد'],['notes','▤','الملاحظات']],
   student: [['overview','▦','لوحة الطالب'],['project','◫','مشروعي'],['deliverables','⇧','التسليمات'],['calendar','▦','المواعيد']],
 };
 const serverRequests = [];

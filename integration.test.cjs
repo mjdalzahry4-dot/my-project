@@ -76,10 +76,13 @@ test('dashboard primary actions lead each role to its own workflow', async () =>
   context.state.page = 'drafts';
   assert.match(context.genericPage(), /لا توجد مسودات|استكمال الطلب/);
   context.state.page = 'calendar';
-  assert.match(context.genericPage(), /لم يحدد القسم مواعيد تسليم بعد/);
+  assert.match(context.genericPage(), /لا توجد مواعيد قادمة/);
+  assert.match(context.genericPage(), /appointment-form/);
   context.state.role = 'dean';
   context.state.page = 'users';
+  context.state.users = [{ id: 'student-1', username: 'student.pending', display_name: 'طالب تجريبي', role: 'student', role_label: 'الطالب', account_status: 'activation_pending', department: null }];
   assert.match(context.genericPage(), /users-filter-form/);
+  assert.match(context.genericPage(), /تفعيل الحساب/);
   context.state.apiToken = 'expired-test-token';
   await assert.rejects(context.apiRequest('/projects/'), /انتهت جلسة الدخول/);
   assert.equal(context.state.role, null, 'expired sessions should return to the sign-in screen');
