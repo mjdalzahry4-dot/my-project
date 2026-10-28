@@ -373,6 +373,17 @@ document.addEventListener('click', async event => {
   const actionButton = event.target.closest('[data-action]');
   if (!actionButton) return;
   const action = actionButton.dataset.action;
+  if (action === 'decision') {
+    event.preventDefault(); event.stopImmediatePropagation();
+    const kind = actionButton.dataset.decision;
+    const prompts = {
+      approved: { title: 'اعتماد المجموعة كاملة؟', message: 'سيعتمد الطلب وينشئ المجموعة والمشروع وحسابات الطلاب غير المفعلة.' },
+      returned: { title: 'إعادة الطلب للتعديل؟', message: 'أدخل ملاحظة توضّح التعديلات المطلوبة.', input: 'ملاحظات التعديل' },
+      rejected: { title: 'رفض الطلب؟', message: 'أدخل سبب رفض الطلب.', input: 'سبب الرفض' },
+    };
+    if (prompts[kind]) { state.modal = { kind, ...prompts[kind] }; render(); }
+    return;
+  }
   if (action === 'next-step') {
     event.preventDefault(); event.stopImmediatePropagation();
     readProject();
