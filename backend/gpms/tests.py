@@ -61,6 +61,19 @@ class GpmsApiTests(TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.data["detail"], "بيانات الدخول غير صحيحة.")
 
+    def test_user_directory_is_dean_only_and_omits_phone_numbers(self):
+        self.client.force_authenticate(self.dean)
+        response = self.client.get("/api/v1/users/")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual({user["username"] for user in response.data}, {
+            "chair.demo", "other.chair", "dean.demo", "supervisor.demo", "student.existing",
+        })
+        self.assertTrue(all("phone" not in user for user in response.data))
+
+        self.client.force_authenticate(self.chair)
+        denied = self.client.get("/api/v1/users/")
+        self.assertEqual(denied.status_code, 403)
+
     def test_chair_can_create_and_submit_one_complete_request(self):
         self.client.force_authenticate(self.chair)
         response = self.client.post("/api/v1/group-requests/", self.payload(), format="json")

@@ -189,6 +189,19 @@ class SupervisorListView(APIView):
         } for user in qs[:200]])
 
 
+class UserListView(APIView):
+    permission_classes = [IsAuthenticatedActive]
+
+    def get(self, request):
+        if request.user.role != User.Role.DEAN:
+            raise PermissionDenied("عرض دليل المستخدمين متاح لعميد الكلية فقط.")
+        users = User.objects.select_related("department", "student_profile", "supervisor_profile").order_by("role", "username")[:500]
+        return Response([{
+            **user_payload(user),
+            "role_label": user.get_role_display(),
+        } for user in users])
+
+
 def input_data(request):
     serializer = RevisionInputSerializer(data=request.data)
     serializer.is_valid(raise_exception=True)

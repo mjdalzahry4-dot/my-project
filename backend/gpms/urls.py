@@ -1,6 +1,6 @@
 from django.urls import path
 
-from .views import AuditListView, DepartmentListView, DeliverableDownloadView, GroupDetailView, GroupListView, GroupRequestDecisionView, GroupRequestDetailView, GroupRequestListCreateView, GroupRequestSubmitView, HealthView, LoginView, LogoutView, MeView, OneTimePasswordView, PasswordResetRequestView, ProjectDeliverablesView, ProjectDetailView, ProjectListView, ProjectNotesView, SupervisorListView
+from .views import AuditListView, DepartmentListView, DeliverableDownloadView, GroupDetailView, GroupListView, GroupRequestDecisionView, GroupRequestDetailView, GroupRequestListCreateView, GroupRequestSubmitView, HealthView, LoginView, LogoutView, MeView, OneTimePasswordView, PasswordResetRequestView, ProjectDeliverablesView, ProjectDetailView, ProjectListView, ProjectNotesView, SupervisorListView, UserListView
 
 urlpatterns = [
     path("health/", HealthView.as_view(), name="health"),
@@ -11,6 +11,7 @@ urlpatterns = [
     path("auth/one-time-password/<str:purpose>/", OneTimePasswordView.as_view(), name="one-time-password"),
     path("departments/", DepartmentListView.as_view(), name="departments"),
     path("supervisors/", SupervisorListView.as_view(), name="supervisors"),
+    path("users/", UserListView.as_view(), name="user-list"),
     path("group-requests/", GroupRequestListCreateView.as_view(), name="group-request-list-create"),
     path("group-requests/<uuid:request_id>/", GroupRequestDetailView.as_view(), name="group-request-detail"),
     path("group-requests/<uuid:request_id>/submit/", GroupRequestSubmitView.as_view(), name="group-request-submit"),

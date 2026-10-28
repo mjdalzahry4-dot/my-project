@@ -10,6 +10,10 @@ state.apiError = '';
 state.apiToken = readStoredApiToken();
 state.projects = [];
 state.groups = [];
+state.users = [];
+state.userSearch = '';
+state.userSearchInput = '';
+state.userRoleFilter = 'all';
 state.auditEvents = [];
 state.draftRequestId = null;
 state.projectNotes = [];
@@ -31,7 +35,10 @@ async function apiRequest(path, options = {}) {
   if (response.status === 204) return null;
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
-    if (response.status === 401 && state.apiToken && !path.endsWith('/auth/login/')) clearStoredApiToken();
+    if (response.status === 401 && state.apiToken && !path.endsWith('/auth/login/')) {
+      clearStoredApiToken();
+      throw new Error('انتهت جلسة الدخول. سجّل الدخول مرة أخرى للمتابعة.');
+    }
     const labels = { group_code: 'رمز المجموعة', project_title: 'عنوان المشروع', project_description: 'وصف المشروع', academic_year: 'العام الدراسي', department_id: 'القسم', members: 'بيانات الطلاب', supervisor: 'بيانات المشرف', full_name: 'الاسم الكامل', username: 'اسم المستخدم', phone: 'رقم الجوال' };
     const messages = [];
     const collectMessages = value => {
@@ -107,9 +114,10 @@ async function loadPageData() {
   try {
     if (['overview', 'requests', 'detail', 'drafts'].includes(state.page) && state.role !== 'student' && state.role !== 'supervisor') await loadRequests();
     if (['groups', 'overview'].includes(state.page)) state.groups = await apiRequest('/groups/');
-    if (['projects', 'project', 'overview'].includes(state.page)) {
+    if (state.page === 'users' && state.role === 'dean') state.users = await apiRequest('/users/');
+    if (['projects', 'project', 'overview', 'notes'].includes(state.page)) {
       state.projects = await apiRequest('/projects/');
-      if (state.page === 'project' && !state.currentProjectId) state.currentProjectId = state.projects[0]?.id || null;
+      if (['project', 'notes'].includes(state.page) && !state.currentProjectId) state.currentProjectId = state.projects[0]?.id || null;
     }
     if (state.page === 'deliverables' && ['student', 'supervisor'].includes(state.role)) {
       state.projects = await apiRequest('/projects/');
@@ -183,9 +191,31 @@ dashboard = function connectedDashboard() {
   const approved = serverRequests.filter(item => item.status === 'approved').length;
   const recent = serverRequests.slice(0, 5);
   const lead = state.apiUser?.display_name || state.apiUser?.username || roles[state.role].name;
-  const rows = recent.length ? requestRows(recent) : '<div class="empty-state">لا توجد طلبات مسجلة حتى الآن.</div>';
-  const primaryAction = state.role === 'chair' ? '<button class="btn btn-teal" data-action="new-group">＋ إنشاء مجموعة</button>' : '<button class="btn btn-outline" data-page="requests">عرض الطلبات <span>←</span></button>';
-  return `${connectionNotice()}<div class="welcome-row"><div><div class="eyebrow">مساحة العمل · ${esc(state.apiUser?.department?.name || 'نظام إدارة مشاريع التخرج')}</div><h1>مرحبًا، ${esc(lead)} 👋</h1><p>ملخص البيانات المسجلة في النظام.</p></div>${primaryAction}</div><div class="stats-grid">${stat('طلبات بانتظار الاعتماد',pending,'◷','من قاعدة البيانات','#d49513','#fff5de')}${stat('طلبات معتمدة',approved,'✓','خلال العام الدراسي الحالي')}${stat('المشاريع المسندة',state.projects.length,'◫','حسب صلاحية الحساب','#3979a3','#eaf3f8')}${stat('المجموعات المسجلة',state.groups.length,'▧','حسب صلاحية الحساب','#755eb3','#f1edfa')}</div><section class="panel"><div class="panel-head"><div><h2 class="panel-title">أحدث الطلبات</h2><div class="panel-sub">الحالة محفوظة على الخادم</div></div><button class="text-link" data-page="requests">عرض الكل ←</button></div><div class="request-list">${rows}</div></section>`;
+  const roleAction = {
+    dean: '<button class="btn btn-outline" data-page="requests">مراجعة الطلبات ←</button>',
+    chair: '<button class="btn btn-teal" data-action="new-group">＋ إنشاء طلب مجموعة</button>',
+    supervisor: '<button class="btn btn-outline" data-page="projects">مشاهدة المشاريع المسندة ←</button>',
+    student: '<button class="btn btn-outline" data-page="project">فتح مشروعي ←</button>',
+  }[state.role];
+  let metrics;
+  let sectionTitle;
+  let sectionRows;
+  let sectionAction;
+  if (['dean', 'chair'].includes(state.role)) {
+    metrics = `${stat('طلبات بانتظار الاعتماد',pending,'◷','من قاعدة البيانات','#d49513','#fff5de')}${stat('طلبات معتمدة',approved,'✓','من قاعدة البيانات')}${stat('المشاريع',state.projects.length,'◫','حسب صلاحية الحساب','#3979a3','#eaf3f8')}${stat('المجموعات',state.groups.length,'▧','حسب صلاحية الحساب','#755eb3','#f1edfa')}`;
+    sectionTitle = 'أحدث الطلبات';
+    sectionRows = recent.length ? requestRows(recent) : '<div class="empty-state">لا توجد طلبات مسجلة حتى الآن.</div>';
+    sectionAction = `<button class="text-link" data-page="requests">عرض الكل ←</button>`;
+  } else {
+    const students = state.groups.reduce((count, group) => count + (group.members?.length || 0), 0);
+    const projectLabel = state.role === 'student' ? 'مشاريعي' : 'مشاريع بإشرافي';
+    const studentLabel = state.role === 'student' ? 'أعضاء مجموعتي' : 'الطلاب ضمن المشاريع';
+    metrics = `${stat(projectLabel,state.projects.length,'◫','المشاريع المرتبطة بحسابك','#3979a3','#eaf3f8')}${stat('المجموعات',state.groups.length,'▧','حسب صلاحية الحساب','#755eb3','#f1edfa')}${stat(studentLabel,students,'♙','بحسب عضوية الفريق','#0d7a6e','#e9f4f1')}`;
+    sectionTitle = state.role === 'student' ? 'مشروعي' : 'المشاريع المسندة';
+    sectionRows = state.projects.length ? state.projects.map(project => `<div class="request-row"><div><div class="request-name">${esc(project.title)}</div><div class="request-meta">${esc(project.group.group_code)} · ${esc(project.group.department.name)}</div></div><span class="status active">${esc(project.status)}</span><button class="btn btn-outline btn-sm" data-action="open-project-notes" data-project-id="${esc(project.id)}">ملاحظات الفريق</button></div>`).join('') : '<div class="empty-state">لا يوجد مشروع مرتبط بهذا الحساب حتى الآن.</div>';
+    sectionAction = state.role === 'student' ? '<button class="text-link" data-page="deliverables">التسليمات ←</button>' : '<button class="text-link" data-page="notes">الملاحظات ←</button>';
+  }
+  return `${connectionNotice()}<div class="welcome-row"><div><div class="eyebrow">مساحة العمل · ${esc(state.apiUser?.department?.name || 'نظام إدارة مشاريع التخرج')}</div><h1>مرحبًا، ${esc(lead)} 👋</h1><p>${state.role === 'dean' ? 'تابع الطلبات والقرارات على مستوى الكلية.' : state.role === 'chair' ? 'أدر طلبات ومجموعات قسمك.' : state.role === 'supervisor' ? 'تابع المشاريع المسندة وملاحظات الفرق.' : 'تابع مشروعك وملفات التسليم.'}</p></div>${roleAction}</div><div class="stats-grid">${metrics}</div><section class="panel"><div class="panel-head"><div><h2 class="panel-title">${sectionTitle}</h2><div class="panel-sub">الحالة محفوظة على الخادم</div></div>${sectionAction}</div><div class="request-list">${sectionRows}</div></section>`;
 };
 
 requestRows = function connectedRequestRows(rows) {
@@ -195,7 +225,7 @@ requestRows = function connectedRequestRows(rows) {
 tablePage = function connectedTablePage() {
   const rows = serverRequests.filter(item => (state.requestFilter === 'all' || item.status === state.requestFilter) && `${item.code} ${item.title} ${item.department}`.toLocaleLowerCase().includes(state.search.toLocaleLowerCase()));
   const canCreate = state.role === 'chair' ? '<button class="btn btn-teal" data-action="new-group">＋ إنشاء مجموعة</button>' : '';
-  return `${connectionNotice()}<div class="welcome-row"><div><div class="eyebrow">${state.role === 'dean' ? 'مراجعة واعتماد' : 'طلبات القسم'}</div><h1>${currentTitle()}</h1><p>الطلبات المعروضة من قاعدة البيانات وبحسب صلاحية حسابك.</p></div>${canCreate}</div><section class="table-panel" style="padding:19px"><div class="panel-head"><div><h2 class="panel-title">كل الطلبات</h2><div class="panel-sub">${rows.length} طلبات</div></div><button class="btn btn-outline btn-sm" data-action="refresh-data">تحديث</button></div><div class="filters"><input type="search" id="request-search" value="${esc(state.search)}" placeholder="ابحث باسم المشروع أو الرقم..." aria-label="بحث الطلبات" /><select id="request-filter" aria-label="تصفية الحالة"><option value="all">كل الحالات</option>${Object.entries(statuses).filter(([key]) => !['active', 'draft'].includes(key)).map(([key, value]) => `<option value="${key}" ${state.requestFilter === key ? 'selected' : ''}>${value}</option>`).join('')}</select></div><div class="table-scroll"><table class="data-table"><thead><tr><th>رقم الطلب / المشروع</th><th>القسم</th><th>الأعضاء</th><th>المشرف</th><th>تاريخ الإرسال</th><th>الحالة</th><th>الإجراء</th></tr></thead><tbody>${rows.length ? rows.map(item => `<tr><td><div class="table-strong">${esc(item.title)}</div><small>${esc(item.code)}</small></td><td>${esc(item.department)}</td><td>${item.members}</td><td>${esc(item.supervisor)}</td><td>${esc(item.date)}</td><td>${statusPill(item.status)}</td><td><button class="btn btn-outline btn-sm" data-action="open-request" data-index="${serverRequests.indexOf(item)}">عرض الطلب</button></td></tr>`).join('') : '<tr><td colspan="7"><div class="empty-state">لا توجد طلبات تطابق البحث أو التصفية.</div></td></tr>'}</tbody></table></div>${connectionNotice()}</section>`;
+  return `${connectionNotice()}<div class="welcome-row"><div><div class="eyebrow">${state.role === 'dean' ? 'مراجعة واعتماد' : 'طلبات القسم'}</div><h1>${currentTitle()}</h1><p>الطلبات المعروضة من قاعدة البيانات وبحسب صلاحية حسابك.</p></div>${canCreate}</div><section class="table-panel" style="padding:19px"><div class="panel-head"><div><h2 class="panel-title">كل الطلبات</h2><div class="panel-sub">${rows.length} طلبات</div></div><button class="btn btn-outline btn-sm" data-action="refresh-data">تحديث</button></div><form id="request-filter-form" class="filters"><input type="search" id="request-search" value="${esc(state.search)}" placeholder="ابحث باسم المشروع أو الرقم..." aria-label="بحث الطلبات" /><select id="request-filter" aria-label="تصفية الحالة"><option value="all">كل الحالات</option>${Object.entries(statuses).filter(([key]) => !['active', 'draft'].includes(key)).map(([key, value]) => `<option value="${key}" ${state.requestFilter === key ? 'selected' : ''}>${value}</option>`).join('')}</select><button class="btn btn-outline btn-sm" type="submit">بحث</button></form><div class="table-scroll"><table class="data-table"><thead><tr><th>رقم الطلب / المشروع</th><th>القسم</th><th>الأعضاء</th><th>المشرف</th><th>تاريخ الإرسال</th><th>الحالة</th><th>الإجراء</th></tr></thead><tbody>${rows.length ? rows.map(item => `<tr><td><div class="table-strong">${esc(item.title)}</div><small>${esc(item.code)}</small></td><td>${esc(item.department)}</td><td>${item.members}</td><td>${esc(item.supervisor)}</td><td>${esc(item.date)}</td><td>${statusPill(item.status)}</td><td><button class="btn btn-outline btn-sm" data-action="open-request" data-index="${serverRequests.indexOf(item)}">عرض الطلب</button></td></tr>`).join('') : '<tr><td colspan="7"><div class="empty-state">لا توجد طلبات تطابق البحث أو التصفية.</div></td></tr>'}</tbody></table></div>${connectionNotice()}</section>`;
 };
 
 detailPage = function connectedDetailPage() {
@@ -219,6 +249,10 @@ wizardStepContent = function connectedWizardContent() {
 genericPage = function connectedGenericPage() {
   const titles = { drafts: 'المسودات المحفوظة', projects: 'المشاريع المسندة إليك', deliverables: 'التقارير والتسليمات', notes: 'الملاحظات', project: 'تفاصيل مشروعي', calendar: 'المواعيد القادمة', groups: 'المجموعات', users: 'المستخدمون', audit: 'سجل العمليات' };
   let content = '<div class="empty-state">لا توجد بيانات متاحة لهذا الحساب.</div>';
+  if (state.page === 'drafts') {
+    const drafts = serverRequests.filter(item => ['draft', 'returned'].includes(item.status));
+    content = drafts.length ? `<div class="request-list">${drafts.map(item => `<div class="request-row"><div><div class="request-name">${esc(item.title)}</div><div class="request-meta">${esc(item.code)} · ${esc(item.department)} · ${item.members} طلاب</div></div>${statusPill(item.status)}<button class="btn btn-outline btn-sm" data-action="resume-draft" data-request-id="${esc(item.id)}">استكمال الطلب</button></div>`).join('')}</div>` : '<div class="empty-state">لا توجد مسودات أو طلبات معادة للتعديل. يمكنك إنشاء طلب جديد والاحتفاظ به كمسودة من خطوة المراجعة.</div>';
+  }
   if (state.page === 'groups' && state.groups.length) content = `<div class="request-list">${state.groups.map(group => `<div class="request-row"><div><div class="request-name">${esc(group.project_title || 'مجموعة مشاريع')}</div><div class="request-meta">${esc(group.group_code)} · ${esc(group.department.name)}</div></div><div>${group.members.length} طلاب</div><span class="status active">${esc(group.status)}</span><button class="btn btn-outline btn-sm" data-action="open-project-notes" data-project-id="${esc(group.project_id)}">الملاحظات</button></div>`).join('')}</div>`;
   if (['projects', 'project'].includes(state.page) && state.projects.length) content = `<div class="request-list">${state.projects.map(project => `<div class="request-row"><div><div class="request-name">${esc(project.title)}</div><div class="request-meta">${esc(project.group.group_code)} · ${esc(project.group.department.name)}</div></div><div>${esc(project.group.academic_year)}</div><span class="status active">${esc(project.status)}</span><button class="btn btn-outline btn-sm" data-action="open-project-notes" data-project-id="${esc(project.id)}">الملاحظات</button></div>`).join('')}</div>`;
   if (state.page === 'audit' && state.auditEvents.length) content = `<div class="request-list">${state.auditEvents.map(event => `<div class="request-row"><div><div class="request-name">${esc(event.action)}</div><div class="request-meta">${esc(event.actor || 'النظام')} · ${esc(event.entity_type)}</div></div><div>${esc(safeDate(event.occurred_at))}</div></div>`).join('')}</div>`;
@@ -227,6 +261,11 @@ genericPage = function connectedGenericPage() {
     content = `<div class="review-grid"><div class="review-item"><span>عنوان المشروع</span><strong>${esc(project.title)}</strong></div><div class="review-item"><span>رمز المجموعة</span><strong>${esc(project.group.group_code)}</strong></div><div class="review-item"><span>القسم</span><strong>${esc(project.group.department.name)}</strong></div><div class="review-item"><span>العام الدراسي</span><strong>${esc(project.group.academic_year)}</strong></div><div class="review-item full"><span>الوصف</span><strong>${esc(project.description)}</strong></div></div><button class="btn btn-teal" data-action="open-project-notes" data-project-id="${esc(project.id)}">عرض ملاحظات المشروع</button>`;
   }
   if (state.page === 'notes' && state.currentProjectId) content = `${state.projectNotes.length ? `<div class="request-list">${state.projectNotes.map(note => `<div class="review-member"><strong>${esc(note.author_name)}</strong> · ${esc(safeDate(note.created_at))}<p>${esc(note.body)}</p></div>`).join('')}</div>` : '<div class="empty-state">لا توجد ملاحظات لهذا المشروع.</div>'}<form id="project-note-form" class="field" style="margin-top:18px"><label for="project-note-body">إضافة ملاحظة للفريق</label><textarea id="project-note-body" required maxlength="5000"></textarea><button class="btn btn-teal" type="submit" style="margin-top:10px">حفظ الملاحظة</button></form>`;
+  if (state.page === 'notes' && !state.currentProjectId) content = '<div class="empty-state">لا توجد مشاريع مرتبطة بالحساب بعد.</div>';
+  if (state.page === 'notes' && state.currentProjectId && state.projects.length > 1) {
+    const selectedProject = state.projects.find(project => project.id === state.currentProjectId);
+    content = `<div class="field"><label for="note-project-picker">المشروع</label><select id="note-project-picker">${state.projects.map(project => `<option value="${esc(project.id)}" ${project.id === state.currentProjectId ? 'selected' : ''}>${esc(project.title)} · ${esc(project.group.group_code)}</option>`).join('')}</select></div>${content}`;
+  }
   if (state.page === 'deliverables') {
     if (!state.currentProjectId) content = '<div class="empty-state">لا يوجد مشروع مرتبط بهذا الحساب حتى الآن.</div>';
     else {
@@ -237,7 +276,14 @@ genericPage = function connectedGenericPage() {
     }
   }
   if (['calendar', 'users'].includes(state.page) || (state.page === 'notes' && !state.currentProjectId)) content = '<div class="empty-state">لا تتوفر بيانات لهذه الوظيفة أو لا يوجد مشروع مرتبط بالحساب.</div>';
-  if (state.page === 'drafts') content = '<div class="empty-state">تُحفظ الطلبات في النظام بحالة مسودة أو معادة للتعديل وتظهر ضمن قائمة الطلبات.</div>';
+  if (state.page === 'calendar') content = '<div class="notice warn"><strong>لم يحدد القسم مواعيد تسليم بعد.</strong><p>ستظهر هنا المواعيد الرسمية ومراحل المشروع عند نشرها من إدارة القسم. إلى ذلك الوقت، تابع حالة المشروع وملفاته من «مشروعي» و«التسليمات».</p><button class="btn btn-outline btn-sm" data-page="project">مشاهدة مشروعي</button></div>';
+  if (state.page === 'users') {
+    const search = state.userSearch.trim().toLocaleLowerCase();
+    const filtered = state.users.filter(user => (state.userRoleFilter === 'all' || user.role === state.userRoleFilter) && `${user.username} ${user.display_name} ${user.department?.name || ''}`.toLocaleLowerCase().includes(search));
+    const roleOptions = [...new Map(state.users.map(user => [user.role, user.role_label])).entries()];
+    const statusLabels = { active: 'نشط', activation_pending: 'بانتظار تفعيل الحساب', pending_approval: 'بانتظار اعتماد المجموعة', disabled: 'موقوف' };
+    content = `<form id="users-filter-form" class="filters"><input type="search" id="users-search" value="${esc(state.userSearchInput)}" placeholder="ابحث بالاسم أو اسم المستخدم أو القسم" aria-label="بحث المستخدمين" /><select id="users-role-filter" aria-label="تصفية الدور"><option value="all">كل الأدوار</option>${roleOptions.map(([role, label]) => `<option value="${esc(role)}" ${state.userRoleFilter === role ? 'selected' : ''}>${esc(label)}</option>`).join('')}</select><button class="btn btn-outline btn-sm" type="submit">بحث</button><button class="btn btn-outline btn-sm" type="button" data-action="refresh-data">تحديث</button></form><div class="table-scroll"><table class="data-table"><thead><tr><th>الاسم</th><th>اسم المستخدم</th><th>الدور</th><th>القسم</th><th>حالة الحساب</th></tr></thead><tbody>${filtered.length ? filtered.map(user => `<tr><td>${esc(user.display_name)}</td><td>${esc(user.username)}</td><td>${esc(user.role_label)}</td><td>${esc(user.department?.name || '—')}</td><td>${esc(statusLabels[user.account_status] || user.account_status)}</td></tr>`).join('') : '<tr><td colspan="5"><div class="empty-state">لا يوجد مستخدمون يطابقون البحث.</div></td></tr>'}</tbody></table></div>`;
+  }
   return `${connectionNotice()}<div class="welcome-row"><div><div class="eyebrow">GPMS · بيانات الخادم</div><h1>${titles[state.page] || currentTitle()}</h1><p>المعلومات معروضة بحسب صلاحيات حسابك.</p></div></div><section class="panel">${content}</section>`;
 };
 
@@ -297,24 +343,49 @@ document.addEventListener('keydown', event => {
 });
 window.addEventListener('resize', () => { if (state.departmentMenuOpen) positionDepartmentMenu(); });
 
-async function submitRealRequest() {
-  try {
-    const project = readProject();
-    if (!project.year.trim()) throw new Error('أدخل العام الدراسي قبل متابعة إرسال الطلب.');
-    if (!UUID_PATTERN.test(project.departmentId || '')) {
-      throw new Error('القسم غير محدد أو أن معرّفه غير صالح. حدّث الصفحة ثم اختر القسم من القائمة.');
-    }
-    if (state.supervisorType === 'existing' && !UUID_PATTERN.test(selectedSupervisorId())) {
-      throw new Error('لا يوجد مشرف مسجل صالح للاختيار. اختر «إضافة مشرف جديد» وأكمل بياناته، أو أضف حساب مشرف أولًا.');
-    }
-    const payload = {
+function buildRequestPayload() {
+  const project = readProject();
+  if (!project.year.trim()) throw new Error('أدخل العام الدراسي قبل متابعة الطلب.');
+  if (!UUID_PATTERN.test(project.departmentId || '')) {
+    throw new Error('القسم غير محدد أو أن معرّفه غير صالح. حدّث الصفحة ثم اختر القسم من القائمة.');
+  }
+  if (!state.students.length || state.students.some(student => !student.name.trim() || !student.username.trim() || !student.phone.trim())) {
+    throw new Error('أكمل الاسم واسم المستخدم ورقم الجوال لكل طالب قبل حفظ الطلب.');
+  }
+  if (state.supervisorType === 'existing' && !UUID_PATTERN.test(selectedSupervisorId())) {
+    throw new Error('لا يوجد مشرف مسجل صالح للاختيار. اختر «إضافة مشرف جديد» وأكمل بياناته، أو أضف حساب مشرف أولًا.');
+  }
+  if (state.supervisorType === 'new' && (!state.supervisor.name.trim() || !state.supervisor.username.trim() || !state.supervisor.phone.trim())) {
+    throw new Error('أكمل اسم المشرف واسم المستخدم ورقم الجوال قبل حفظ الطلب.');
+  }
+  return {
       group_code: project.group.trim(), project_title: project.title.trim(), project_description: project.desc.trim(),
       academic_year: project.year.trim(), department_id: project.departmentId,
       members: state.students.map(student => ({ full_name: student.name.trim(), username: student.username.trim(), phone: student.phone.trim() })),
       supervisor: state.supervisorType === 'existing'
         ? { kind: 'existing', existing_user_id: selectedSupervisorId() }
         : { kind: 'new', full_name: state.supervisor.name.trim(), username: state.supervisor.username.trim(), phone: state.supervisor.phone.trim(), email: state.supervisor.email.trim(), specialty: state.supervisor.specialty.trim() },
-    };
+  };
+}
+
+async function saveRealDraft() {
+  try {
+    const payload = buildRequestPayload();
+    const created = state.draftRequestId
+      ? await apiRequest(`/group-requests/${state.draftRequestId}/`, { method: 'PATCH', body: JSON.stringify(payload) })
+      : await apiRequest('/group-requests/', { method: 'POST', body: JSON.stringify(payload) });
+    state.draftRequestId = created.id;
+    await loadRequests();
+    state.page = 'drafts'; state.modal = null; render();
+    toast('تم حفظ الطلب كمسودة. يمكنك استكماله لاحقًا.');
+  } catch (error) {
+    state.apiError = error.message; render(); toast(error.message, 'error');
+  }
+}
+
+async function submitRealRequest() {
+  try {
+    const payload = buildRequestPayload();
     const created = state.draftRequestId
       ? await apiRequest(`/group-requests/${state.draftRequestId}/`, { method: 'PATCH', body: JSON.stringify(payload) })
       : await apiRequest('/group-requests/', { method: 'POST', body: JSON.stringify(payload) });
@@ -325,6 +396,26 @@ async function submitRealRequest() {
     state.activeRequest = serverRequests.findIndex(item => item.id === submitted.id);
     state.page = 'detail'; state.modal = null; render();
     toast('تم حفظ الطلب وإرساله إلى العميد.');
+  } catch (error) {
+    state.apiError = error.message; render(); toast(error.message, 'error');
+  }
+}
+
+async function resumeDraft(requestId) {
+  try {
+    const item = serverRequests.find(request => request.id === requestId);
+    if (!item || !['draft', 'returned'].includes(item.status)) throw new Error('هذه المسودة لم تعد قابلة للتعديل. حدّث القائمة.');
+    const [departments, supervisors] = await Promise.all([apiRequest('/departments/'), apiRequest('/supervisors/')]);
+    const revision = item.revision || {};
+    const supervisor = item.supervisorDetail || {};
+    state.departments = departments; state.supervisors = supervisors;
+    state.project = { group: item.code, title: item.title, desc: item.desc, department: item.department, departmentId: item.departmentId, year: item.year };
+    state.students = item.memberDetails.map(member => ({ name: member.full_name, username: member.username_proposed, phone: member.phone_proposed }));
+    state.supervisorType = supervisor.supervisor_type === 'new' ? 'new' : 'existing';
+    state.selectedSupervisor = supervisor.existing_user_id || '';
+    state.supervisor = { name: supervisor.full_name || '', username: supervisor.username_proposed || '', phone: supervisor.phone_proposed || '', email: supervisor.email || '', specialty: supervisor.specialty || '' };
+    state.draftRequestId = item.id; state.step = 0; state.page = 'wizard'; state.modal = null; state.apiError = '';
+    render();
   } catch (error) {
     state.apiError = error.message; render(); toast(error.message, 'error');
   }
@@ -424,13 +515,19 @@ document.addEventListener('click', async event => {
       state.project = { group: '', title: '', desc: '', department: selectedDepartment?.name || '', departmentId: selectedDepartment?.id || '', year: '2026–2027' };
       state.students = [emptyStudent()]; state.supervisorType = supervisors.length ? 'existing' : 'new'; state.selectedSupervisor = supervisors[0]?.id || '';
       state.supervisor = { name: '', username: '', phone: '', email: '', specialty: '' };
-      state.step = 0; state.page = 'wizard'; state.modal = null; render();
+      state.draftRequestId = null; state.step = 0; state.page = 'wizard'; state.modal = null; render();
     } catch (error) { state.apiError = error.message; render(); toast(error.message, 'error'); }
     return;
   }
   if (action === 'cancel-wizard') {
     event.preventDefault(); event.stopImmediatePropagation();
-    state.page = 'overview'; state.modal = null; await loadPageData(); render(); return;
+    state.page = state.draftRequestId ? 'drafts' : 'overview'; state.modal = null; await loadPageData(); render(); return;
+  }
+  if (action === 'save-draft') {
+    event.preventDefault(); event.stopImmediatePropagation(); await saveRealDraft(); return;
+  }
+  if (action === 'resume-draft') {
+    event.preventDefault(); event.stopImmediatePropagation(); await resumeDraft(actionButton.dataset.requestId); return;
   }
   if (action === 'confirm-decision' && state.modal?.kind === 'submit') {
     event.preventDefault(); event.stopImmediatePropagation(); await submitRealRequest(); return;
@@ -454,9 +551,27 @@ document.addEventListener('change', event => {
     state.project.department = state.departments.find(item => item.id === event.target.value)?.name || '';
   }
   if (event.target.id === 'supervisor-existing') state.selectedSupervisor = event.target.value;
+  if (event.target.id === 'users-role-filter') { state.userRoleFilter = event.target.value; render(); }
+  if (event.target.id === 'note-project-picker') {
+    state.currentProjectId = event.target.value;
+    loadPageData().finally(render);
+  }
 }, true);
 
 document.addEventListener('submit', async event => {
+  if (event.target.id === 'request-filter-form') {
+    event.preventDefault(); event.stopImmediatePropagation();
+    state.search = document.querySelector('#request-search')?.value || '';
+    state.requestFilter = document.querySelector('#request-filter')?.value || 'all';
+    render(); return;
+  }
+  if (event.target.id === 'users-filter-form') {
+    event.preventDefault(); event.stopImmediatePropagation();
+    state.userSearchInput = document.querySelector('#users-search')?.value || '';
+    state.userSearch = state.userSearchInput;
+    state.userRoleFilter = document.querySelector('#users-role-filter')?.value || 'all';
+    render(); return;
+  }
   if (event.target.id === 'deliverable-upload-form') {
     event.preventDefault(); event.stopImmediatePropagation();
     const file = document.querySelector('#deliverable-file')?.files?.[0];
