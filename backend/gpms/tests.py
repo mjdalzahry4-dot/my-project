@@ -1,12 +1,14 @@
 from unittest.mock import patch
+import tempfile
 
 from django.contrib.auth.hashers import make_password
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import IntegrityError
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.urls import reverse
 from rest_framework.test import APIClient
 
-from .models import AuditLog, Department, GroupMember, GroupRequest, OneTimeToken, OutboxEvent, Project, ProjectGroup, ProjectNote, ProjectSupervisor, RequestDecision, RequestSupervisor, StudentProfile, SupervisorProfile, User
+from .models import AuditLog, Deliverable, Department, GroupMember, GroupRequest, OneTimeToken, OutboxEvent, Project, ProjectGroup, ProjectNote, ProjectSupervisor, RequestDecision, RequestSupervisor, StudentProfile, SupervisorProfile, User
 from .tokens import issue_token
 
 
@@ -70,6 +72,29 @@ class GpmsApiTests(TestCase):
         self.assertEqual(submit.status_code, 200, submit.data)
         self.assertEqual(submit.data["status"], GroupRequest.Status.PENDING)
         self.assertFalse(GroupMember.objects.exists())
+
+    def test_existing_supervisor_without_profile_does_not_crash_request_creation(self):
+        supervisor = User.objects.create_user(
+            username="supervisor.no-profile",
+            password="SupervisorPassword-Without-Profile-97!",
+            role=User.Role.SUPERVISOR,
+            department=self.department,
+        )
+        payload = self.payload(code="GP-T-NO-PROFILE")
+        payload["supervisor"] = {"kind": "existing", "existing_user_id": str(supervisor.id)}
+
+        self.client.force_authenticate(self.chair)
+        response = self.client.post("/api/v1/group-requests/", payload, format="json")
+
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertEqual(response.data["current_revision"]["supervisor"]["full_name"], supervisor.username)
+        submitted = self.client.post(
+            f"/api/v1/group-requests/{response.data['id']}/submit/",
+            {"version": response.data["version"]},
+            format="json",
+        )
+        self.assertEqual(submitted.status_code, 200, submitted.data)
+        self.assertEqual(submitted.data["status"], GroupRequest.Status.PENDING)
 
     def test_duplicate_usernames_in_request_are_rejected(self):
         self.client.force_authenticate(self.chair)
@@ -201,6 +226,39 @@ class GpmsApiTests(TestCase):
         outsider = User.objects.create_user(username="student.unassigned", password="StudentPassword-97!", role=User.Role.STUDENT)
         self.client.force_authenticate(outsider)
         self.assertEqual(self.client.get(f"/api/v1/projects/{project.id}/notes/").status_code, 404)
+
+    def test_student_can_upload_and_download_project_deliverable_but_outsider_cannot(self):
+        request_id = self.make_pending()
+        self.client.force_authenticate(self.dean)
+        self.client.post(f"/api/v1/group-requests/{request_id}/approve/", {}, format="json")
+        project = Project.objects.get(group__source_request_id=request_id)
+        student = User.objects.get(username="student.new")
+        student.account_status = User.AccountStatus.ACTIVE
+        student.save(update_fields=["account_status"])
+
+        self.client.force_authenticate(student)
+        with tempfile.TemporaryDirectory() as media_root, override_settings(MEDIA_ROOT=media_root):
+            upload = self.client.post(
+                f"/api/v1/projects/{project.id}/deliverables/",
+                {"file": SimpleUploadedFile("sample.txt", b"sample attachment", content_type="text/plain")},
+                format="multipart",
+            )
+            self.assertEqual(upload.status_code, 201, upload.data)
+            self.assertEqual(upload.data["original_filename"], "sample.txt")
+            self.assertEqual(upload.data["size_bytes"], len(b"sample attachment"))
+            self.assertEqual(Deliverable.objects.filter(project=project, uploaded_by=student).count(), 1)
+
+            listing = self.client.get(f"/api/v1/projects/{project.id}/deliverables/")
+            self.assertEqual(listing.status_code, 200, listing.data)
+            self.assertEqual([item["id"] for item in listing.data], [upload.data["id"]])
+            download = self.client.get(f"/api/v1/deliverables/{upload.data['id']}/download/")
+            self.assertEqual(download.status_code, 200)
+            self.assertEqual(b"".join(download.streaming_content), b"sample attachment")
+
+            outsider = User.objects.create_user(username="student.unassigned", password="StudentPassword-97!", role=User.Role.STUDENT)
+            self.client.force_authenticate(outsider)
+            self.assertEqual(self.client.get(f"/api/v1/projects/{project.id}/deliverables/").status_code, 404)
+            self.assertEqual(self.client.get(f"/api/v1/deliverables/{upload.data['id']}/download/").status_code, 404)
 
     def test_failure_while_creating_new_supervisor_rolls_back_all_approval_records(self):
         request_id = self.make_pending()

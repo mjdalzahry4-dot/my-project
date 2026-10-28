@@ -1,6 +1,6 @@
 from django.urls import path
 
-from .views import AuditListView, DepartmentListView, GroupDetailView, GroupListView, GroupRequestDecisionView, GroupRequestDetailView, GroupRequestListCreateView, GroupRequestSubmitView, HealthView, LoginView, LogoutView, MeView, OneTimePasswordView, PasswordResetRequestView, ProjectDetailView, ProjectListView, ProjectNotesView, SupervisorListView
+from .views import AuditListView, DepartmentListView, DeliverableDownloadView, GroupDetailView, GroupListView, GroupRequestDecisionView, GroupRequestDetailView, GroupRequestListCreateView, GroupRequestSubmitView, HealthView, LoginView, LogoutView, MeView, OneTimePasswordView, PasswordResetRequestView, ProjectDeliverablesView, ProjectDetailView, ProjectListView, ProjectNotesView, SupervisorListView
 
 urlpatterns = [
     path("health/", HealthView.as_view(), name="health"),
@@ -20,5 +20,7 @@ urlpatterns = [
     path("projects/", ProjectListView.as_view(), name="project-list"),
     path("projects/<uuid:project_id>/", ProjectDetailView.as_view(), name="project-detail"),
     path("projects/<uuid:project_id>/notes/", ProjectNotesView.as_view(), name="project-notes"),
+    path("projects/<uuid:project_id>/deliverables/", ProjectDeliverablesView.as_view(), name="project-deliverables"),
+    path("deliverables/<uuid:deliverable_id>/download/", DeliverableDownloadView.as_view(), name="deliverable-download"),
     path("audit-log/", AuditListView.as_view(), name="audit-log"),
 ]

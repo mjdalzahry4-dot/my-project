@@ -15,11 +15,12 @@ state.draftRequestId = null;
 state.projectNotes = [];
 state.currentProjectId = null;
 state.projectDetail = null;
+state.deliverables = [];
 
 async function apiRequest(path, options = {}) {
   const method = (options.method || 'GET').toUpperCase();
   const headers = new Headers(options.headers || {});
-  if (options.body && !headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
+  if (options.body && !(options.body instanceof FormData) && !headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
   if (state.apiToken && !headers.has('Authorization')) headers.set('Authorization', `Token ${state.apiToken}`);
   let response;
   try {
@@ -109,6 +110,11 @@ async function loadPageData() {
     if (['projects', 'project', 'overview'].includes(state.page)) {
       state.projects = await apiRequest('/projects/');
       if (state.page === 'project' && !state.currentProjectId) state.currentProjectId = state.projects[0]?.id || null;
+    }
+    if (state.page === 'deliverables' && ['student', 'supervisor'].includes(state.role)) {
+      state.projects = await apiRequest('/projects/');
+      if (!state.currentProjectId || !state.projects.some(project => project.id === state.currentProjectId)) state.currentProjectId = state.projects[0]?.id || null;
+      state.deliverables = state.currentProjectId ? await apiRequest(`/projects/${state.currentProjectId}/deliverables/`) : [];
     }
     if (state.page === 'project' && state.currentProjectId) state.projectDetail = await apiRequest(`/projects/${state.currentProjectId}/`);
     if (state.page === 'notes' && state.currentProjectId) state.projectNotes = await apiRequest(`/projects/${state.currentProjectId}/notes/`);
@@ -221,7 +227,16 @@ genericPage = function connectedGenericPage() {
     content = `<div class="review-grid"><div class="review-item"><span>عنوان المشروع</span><strong>${esc(project.title)}</strong></div><div class="review-item"><span>رمز المجموعة</span><strong>${esc(project.group.group_code)}</strong></div><div class="review-item"><span>القسم</span><strong>${esc(project.group.department.name)}</strong></div><div class="review-item"><span>العام الدراسي</span><strong>${esc(project.group.academic_year)}</strong></div><div class="review-item full"><span>الوصف</span><strong>${esc(project.description)}</strong></div></div><button class="btn btn-teal" data-action="open-project-notes" data-project-id="${esc(project.id)}">عرض ملاحظات المشروع</button>`;
   }
   if (state.page === 'notes' && state.currentProjectId) content = `${state.projectNotes.length ? `<div class="request-list">${state.projectNotes.map(note => `<div class="review-member"><strong>${esc(note.author_name)}</strong> · ${esc(safeDate(note.created_at))}<p>${esc(note.body)}</p></div>`).join('')}</div>` : '<div class="empty-state">لا توجد ملاحظات لهذا المشروع.</div>'}<form id="project-note-form" class="field" style="margin-top:18px"><label for="project-note-body">إضافة ملاحظة للفريق</label><textarea id="project-note-body" required maxlength="5000"></textarea><button class="btn btn-teal" type="submit" style="margin-top:10px">حفظ الملاحظة</button></form>`;
-  if (['deliverables', 'calendar', 'users'].includes(state.page) || (state.page === 'notes' && !state.currentProjectId)) content = '<div class="empty-state">لا تتوفر بيانات لهذه الوظيفة أو لا يوجد مشروع مرتبط بالحساب.</div>';
+  if (state.page === 'deliverables') {
+    if (!state.currentProjectId) content = '<div class="empty-state">لا يوجد مشروع مرتبط بهذا الحساب حتى الآن.</div>';
+    else {
+      const project = state.projects.find(item => item.id === state.currentProjectId);
+      const items = state.deliverables.length ? `<div class="request-list">${state.deliverables.map(item => `<div class="request-row"><div><div class="request-name">${esc(item.original_filename)}</div><div class="request-meta">${esc(item.uploaded_by_name)} · ${esc(safeDate(item.created_at))} · ${Math.ceil(item.size_bytes / 1024)} كيلوبايت</div></div><a class="btn btn-outline btn-sm" href="${API_BASE}/deliverables/${encodeURIComponent(item.id)}/download/" data-download-id="${esc(item.id)}">تنزيل الملف</a></div>`).join('')}</div>` : '<div class="empty-state">لا توجد ملفات مرفوعة لهذا المشروع.</div>';
+      const upload = state.role === 'student' ? `<form id="deliverable-upload-form" class="field" style="margin:16px 0" enctype="multipart/form-data"><label for="deliverable-file">إرفاق ملف للمشروع</label><input id="deliverable-file" name="file" type="file" required /><span class="help">الحد الأقصى 10 ميغابايت.</span><button class="btn btn-teal" type="submit" style="margin-top:10px">رفع الملف</button></form>` : '';
+      content = `<div class="panel-head"><div><strong>${esc(project?.title || 'ملفات المشروع')}</strong><div class="panel-sub">${esc(project?.group?.group_code || '')}</div></div><button class="btn btn-outline btn-sm" data-action="refresh-data">تحديث</button></div>${upload}${items}`;
+    }
+  }
+  if (['calendar', 'users'].includes(state.page) || (state.page === 'notes' && !state.currentProjectId)) content = '<div class="empty-state">لا تتوفر بيانات لهذه الوظيفة أو لا يوجد مشروع مرتبط بالحساب.</div>';
   if (state.page === 'drafts') content = '<div class="empty-state">تُحفظ الطلبات في النظام بحالة مسودة أو معادة للتعديل وتظهر ضمن قائمة الطلبات.</div>';
   return `${connectionNotice()}<div class="welcome-row"><div><div class="eyebrow">GPMS · بيانات الخادم</div><h1>${titles[state.page] || currentTitle()}</h1><p>المعلومات معروضة بحسب صلاحيات حسابك.</p></div></div><section class="panel">${content}</section>`;
 };
@@ -331,6 +346,18 @@ async function decideRealRequest() {
 }
 
 document.addEventListener('click', async event => {
+  const downloadLink = event.target.closest('[data-download-id]');
+  if (downloadLink) {
+    event.preventDefault(); event.stopImmediatePropagation();
+    try {
+      const response = await fetch(downloadLink.href, { headers: { Authorization: `Token ${state.apiToken}` }, credentials: 'omit' });
+      if (!response.ok) throw new Error('تعذر تنزيل الملف. تحقق من صلاحية الحساب.');
+      const blobUrl = URL.createObjectURL(await response.blob());
+      const anchor = document.createElement('a'); anchor.href = blobUrl; anchor.download = downloadLink.closest('.request-row')?.querySelector('.request-name')?.textContent || 'attachment';
+      document.body.append(anchor); anchor.click(); anchor.remove(); URL.revokeObjectURL(blobUrl);
+    } catch (error) { toast(error.message, 'error'); }
+    return;
+  }
   if (state.departmentMenuOpen && !event.target.closest('.department-picker-field')) {
     state.departmentMenuOpen = false;
     document.querySelector('#department-options')?.classList.remove('is-open');
@@ -419,6 +446,19 @@ document.addEventListener('change', event => {
 }, true);
 
 document.addEventListener('submit', async event => {
+  if (event.target.id === 'deliverable-upload-form') {
+    event.preventDefault(); event.stopImmediatePropagation();
+    const file = document.querySelector('#deliverable-file')?.files?.[0];
+    if (!file) { toast('اختر ملفًا قبل الرفع.', 'error'); return; }
+    const submitButton = event.target.querySelector('[type="submit"]');
+    submitButton.disabled = true; submitButton.textContent = 'جارٍ رفع الملف…';
+    try {
+      const formData = new FormData(); formData.append('file', file);
+      await apiRequest(`/projects/${state.currentProjectId}/deliverables/`, { method: 'POST', body: formData });
+      await loadPageData(); render(); toast('تم رفع الملف إلى المشروع.');
+    } catch (error) { state.apiError = error.message; render(); toast(error.message, 'error'); }
+    return;
+  }
   if (event.target.id === 'project-note-form') {
     event.preventDefault(); event.stopImmediatePropagation();
     try {

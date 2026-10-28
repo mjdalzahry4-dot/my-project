@@ -1,6 +1,6 @@
 from rest_framework import serializers
 
-from .models import Department, GroupMember, GroupRequest, Project, ProjectGroup, ProjectNote, ProjectSupervisor, RequestDecision, RequestMember, RequestRevision, RequestSupervisor, StudentProfile, SupervisorProfile, User
+from .models import Department, Deliverable, GroupMember, GroupRequest, Project, ProjectGroup, ProjectNote, ProjectSupervisor, RequestDecision, RequestMember, RequestRevision, RequestSupervisor, StudentProfile, SupervisorProfile, User
 
 
 class DepartmentSerializer(serializers.ModelSerializer):
@@ -43,7 +43,8 @@ class SupervisorInputSerializer(serializers.Serializer):
             account = User.objects.filter(id=account_id, role=User.Role.SUPERVISOR, account_status=User.AccountStatus.ACTIVE).first() if account_id else None
             if not account:
                 raise serializers.ValidationError("تعذر التحقق من حساب المشرف المختار.")
-            attrs["full_name"] = account.supervisor_profile.full_name
+            profile = getattr(account, "supervisor_profile", None)
+            attrs["full_name"] = profile.full_name if profile and profile.full_name.strip() else account.username
             attrs["username"] = account.username
         else:
             if attrs.get("existing_user_id") or not all(attrs.get(key) for key in ("full_name", "username", "phone")):
@@ -176,3 +177,11 @@ class ProjectNoteReadSerializer(serializers.ModelSerializer):
     class Meta:
         model = ProjectNote
         fields = ["id", "author_name", "body", "visibility", "created_at", "updated_at"]
+
+
+class DeliverableReadSerializer(serializers.ModelSerializer):
+    uploaded_by_name = serializers.CharField(source="uploaded_by.username", read_only=True)
+
+    class Meta:
+        model = Deliverable
+        fields = ["id", "uploaded_by_name", "original_filename", "media_type", "size_bytes", "status", "created_at"]

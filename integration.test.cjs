@@ -7,7 +7,7 @@ const vm = require('node:vm');
 test('shows a connection warning when session restoration cannot reach the API', async () => {
   const app = { innerHTML: '' };
   const context = {
-    window: {},
+    window: { addEventListener() {} },
     state: { page: 'overview' },
     roles: {},
     demoRequests: [],

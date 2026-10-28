@@ -1,20 +1,27 @@
+import os
+from uuid import uuid4
+
 from django.contrib.auth.hashers import check_password, make_password
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import transaction
+from django.core.files.storage import default_storage
+from django.http import FileResponse
 from django.shortcuts import get_object_or_404
 from django.utils.decorators import method_decorator
+from django.utils.http import content_disposition_header
 from rest_framework import status
 from rest_framework.exceptions import NotFound, PermissionDenied, ValidationError
 from rest_framework.permissions import AllowAny
+from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.response import Response
 from rest_framework.throttling import SimpleRateThrottle
 from rest_framework.views import APIView
 from rest_framework.authtoken.models import Token
 
-from .models import AuditLog, Department, GroupMember, GroupRequest, OneTimeToken, OutboxEvent, Project, ProjectGroup, ProjectNote, ProjectSupervisor, RequestDecision, RequestRevision, RequestSupervisor, User
+from .models import AuditLog, Department, Deliverable, GroupMember, GroupRequest, OneTimeToken, OutboxEvent, Project, ProjectGroup, ProjectNote, ProjectSupervisor, RequestDecision, RequestRevision, RequestSupervisor, User
 from .permissions import IsAuthenticatedActive, can_view_project, request_queryset_for
-from .serializers import DepartmentSerializer, GroupDetailReadSerializer, GroupRequestReadSerializer, ProjectNoteReadSerializer, ProjectReadSerializer, RevisionInputSerializer
+from .serializers import DepartmentSerializer, DeliverableReadSerializer, GroupDetailReadSerializer, GroupRequestReadSerializer, ProjectNoteReadSerializer, ProjectReadSerializer, RevisionInputSerializer
 from .services import Conflict, audit, create_request, decide_request, submit_request, update_request
 from .tokens import consume_token, get_valid_token
 
@@ -353,6 +360,71 @@ class ProjectNotesView(APIView):
         note = ProjectNote.objects.create(project=project, author=request.user, body=body, visibility=visibility)
         audit(request.user, "project_note.created", "project_note", note.id)
         return Response(ProjectNoteReadSerializer(note).data, status=status.HTTP_201_CREATED)
+
+
+class ProjectDeliverablesView(APIView):
+    permission_classes = [IsAuthenticatedActive]
+    parser_classes = [MultiPartParser, FormParser]
+    max_file_size = 10 * 1024 * 1024
+
+    def get_project(self, request, project_id):
+        project = get_object_or_404(project_queryset_for(request.user), id=project_id)
+        if not can_view_project(request.user, project):
+            raise NotFound()
+        return project
+
+    def get(self, request, project_id):
+        project = self.get_project(request, project_id)
+        items = project.deliverables.select_related("uploaded_by").order_by("-created_at")
+        return Response(DeliverableReadSerializer(items, many=True).data)
+
+    def post(self, request, project_id):
+        if request.user.role != User.Role.STUDENT:
+            raise PermissionDenied("رفع ملفات المشروع متاح لأعضاء المجموعة من حساب الطالب.")
+        project = self.get_project(request, project_id)
+        uploaded = request.FILES.get("file")
+        if not uploaded:
+            raise ValidationError({"file": "اختر ملفًا لإرفاقه."})
+        if uploaded.size <= 0:
+            raise ValidationError({"file": "الملف فارغ."})
+        if uploaded.size > self.max_file_size:
+            raise ValidationError({"file": "الحد الأقصى لحجم الملف 10 ميغابايت."})
+
+        filename = os.path.basename(uploaded.name.replace("\\", "/")).strip()[:255] or "attachment"
+        storage_name = f"deliverables/{project.id}/{uuid4().hex}_{filename}"
+        storage_key = default_storage.save(storage_name, uploaded)
+        try:
+            item = Deliverable.objects.create(
+                project=project,
+                uploaded_by=request.user,
+                storage_key=storage_key,
+                original_filename=filename,
+                media_type=(uploaded.content_type or "application/octet-stream")[:120],
+                size_bytes=uploaded.size,
+            )
+        except Exception:
+            default_storage.delete(storage_key)
+            raise
+        audit(request.user, "deliverable.uploaded", "deliverable", item.id, metadata={"project_id": str(project.id)})
+        return Response(DeliverableReadSerializer(item).data, status=status.HTTP_201_CREATED)
+
+
+class DeliverableDownloadView(APIView):
+    permission_classes = [IsAuthenticatedActive]
+
+    def get(self, request, deliverable_id):
+        item = get_object_or_404(Deliverable.objects.select_related("project", "uploaded_by"), id=deliverable_id)
+        project = get_object_or_404(project_queryset_for(request.user), id=item.project_id)
+        if not can_view_project(request.user, project):
+            raise NotFound()
+        try:
+            uploaded = default_storage.open(item.storage_key, "rb")
+        except FileNotFoundError:
+            raise NotFound("الملف غير موجود في التخزين.")
+        response = FileResponse(uploaded, content_type="application/octet-stream")
+        response["Content-Disposition"] = content_disposition_header(True, item.original_filename)
+        response["X-Content-Type-Options"] = "nosniff"
+        return response
 
 
 class AuditListView(APIView):
