@@ -4,12 +4,12 @@ const roles = {
   supervisor: { label: 'المشرف الأكاديمي', system: 'مشرف أكاديمي', name: '', initials: '' },
   student: { label: 'الطالب', system: 'طالب', name: '', initials: '' },
 };
-const statuses = { pending: 'بانتظار اعتماد العميد', approved: 'معتمد', returned: 'معاد للتعديل', rejected: 'مرفوض', draft: 'مسودة', active: 'نشط' };
+const statuses = { pending: 'بانتظار اعتماد رئيس القسم', approved: 'معتمد', returned: 'معاد للتعديل', rejected: 'مرفوض', draft: 'مسودة', active: 'نشط' };
 const navByRole = {
-  dean: [['overview','▦','لوحة التحكم'],['requests','▤','طلبات الاعتماد'],['groups','◫','المجموعات'],['calendar','▦','المواعيد'],['users','♙','المستخدمون'],['audit','◷','سجل العمليات']],
-  chair: [['overview','▦','لوحة التحكم'],['groups','◫','إدارة المجموعات'],['requests','▤','طلبات القسم'],['calendar','▦','المواعيد'],['drafts','▧','المسودات']],
-  supervisor: [['overview','▦','لوحة المشرف'],['projects','◫','مشاريعي'],['deliverables','⇧','التقارير والتسليمات'],['calendar','▦','المواعيد'],['notes','▤','الملاحظات']],
-  student: [['overview','▦','لوحة الطالب'],['project','◫','مشروعي'],['deliverables','⇧','التسليمات'],['calendar','▦','المواعيد']],
+  dean: [['overview','▦','لوحة التحكم'],['requests','▤','طلبات الكلية'],['groups','◫','المجموعات'],['calendar','▦','المواعيد'],['users','♙','الطلاب وتفعيل الحسابات'],['committees','⚖','لجان المشاريع'],['reports','▧','التقارير والتصدير'],['audit','◷','سجل العمليات'],['notifications','♧','الإشعارات']],
+  chair: [['overview','▦','لوحة التحكم'],['groups','◫','إدارة المجموعات'],['requests','▤','طلبات القسم'],['calendar','▦','المواعيد'],['users','♙','مستخدمو القسم'],['committees','⚖','لجنة مشاريع التخرج'],['reports','▧','التقارير والتصدير'],['notifications','♧','الإشعارات']],
+  supervisor: [['overview','▦','لوحة المشرف'],['projects','◫','مشاريعي'],['committees','⚖','مراجعة أفكار اللجنة'],['deliverables','⇧','التقارير والتسليمات'],['calendar','▦','المواعيد'],['notes','▤','الملاحظات'],['reports','▧','التقارير والتصدير'],['notifications','♧','الإشعارات']],
+  student: [['overview','▦','لوحة الطالب'],['requests','▤','طلباتي للمجموعات'],['project','◫','مشروعي'],['deliverables','⇧','التسليمات'],['calendar','▦','المواعيد'],['reports','▧','تقارير مشروعي'],['notifications','♧','الإشعارات']],
 };
 const serverRequests = [];
 const state = {
@@ -31,7 +31,7 @@ function login() {
   document.querySelector('#app').innerHTML = `<div class="login-page"><section class="login-art"><div class="brand-lockup"><div class="brand-mark">ج</div><div><div class="brand-name">إدارة مشاريع التخرج</div><div class="brand-sub">Graduation Projects Management System</div></div></div><div class="art-copy"><div class="eyebrow">GPMS · بوابتك الأكاديمية</div><h1>من فكرة التخرج<br>إلى إنجاز يُفتخر به</h1><p>مساحة موحّدة تجمع الطالب والمشرف والقسم والكلية في رحلة المشروع.</p></div><div class="art-foot">الدخول بحساب النظام</div></section><section class="login-panel"><form class="login-box" id="login-form"><div class="eyebrow">مرحبًا بك</div><h2>تسجيل الدخول</h2><p>استخدم اسم المستخدم وكلمة المرور المسجلين في النظام.</p><div class="field"><label for="login-user">اسم المستخدم</label><input id="login-user" autocomplete="username" required /></div><div class="field"><label for="login-password">كلمة المرور</label><div class="input-wrap"><input id="login-password" type="password" autocomplete="current-password" required /><button type="button" class="ghost-eye" data-action="toggle-password">إظهار</button></div></div><button type="submit" class="btn btn-primary btn-block">تسجيل الدخول <span>←</span></button></form></section></div>`;
 }
 function currentTitle() {
-  const titles = { overview:'لوحة التحكم', requests:state.role === 'dean' ? 'طلبات الاعتماد' : 'طلبات القسم', drafts:'المسودات', projects:'المشاريع المسندة', project:'تفاصيل المشروع', groups:'المجموعات', notes:'الملاحظات', users:'المستخدمون', audit:'سجل العمليات', deliverables:'التقارير والتسليمات', calendar:'المواعيد', wizard:'إنشاء مجموعة', detail:'تفاصيل الطلب' };
+  const titles = { overview:'لوحة التحكم', requests:state.role === 'dean' ? 'طلبات الكلية' : state.role === 'student' ? 'طلباتي للمجموعات' : 'طلبات القسم', drafts:'المسودات', projects:'المشاريع المسندة', project:'تفاصيل المشروع', groups:'المجموعات', notes:'الملاحظات', users:state.role === 'dean' ? 'الطلاب وتفعيل الحسابات' : 'مستخدمو القسم', committees:state.role === 'dean' ? 'اعتماد لجان مشاريع التخرج' : state.role === 'supervisor' ? 'مراجعة أفكار اللجنة' : 'ترشيح لجنة مشاريع التخرج', reports:'التقارير والتصدير', audit:'سجل العمليات', deliverables:'التقارير والتسليمات', calendar:'المواعيد', notifications:'الإشعارات', wizard:'إنشاء مجموعة', detail:'تفاصيل الطلب' };
   return titles[state.page] || 'إدارة مشاريع التخرج';
 }
 function stat(label, value, icon, note = '', accent = '#0d7a6e', tint = '#e9f4f1') {

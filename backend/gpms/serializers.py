@@ -1,6 +1,9 @@
+from datetime import timedelta
+
+from django.utils import timezone
 from rest_framework import serializers
 
-from .models import Department, Deliverable, GroupMember, GroupRequest, Project, ProjectAppointment, ProjectGroup, ProjectNote, ProjectSupervisor, RequestDecision, RequestMember, RequestRevision, RequestSupervisor, StudentProfile, SupervisorProfile, User
+from .models import DefenseCommittee, DefenseRubricCriterion, Department, Deliverable, DiscussionReadinessRequest, GroupMember, GroupRequest, Notification, Project, ProjectAppointment, ProjectCommittee, ProjectCommitteeMember, ProjectGroup, ProjectIdeaCommitteeReview, ProjectIdeaRevision, ProjectNote, ProjectPlan, ProjectStage, ProjectStageReview, ProjectSupervisor, ProjectTask, RequestDecision, RequestMember, RequestRevision, RequestSupervisor, StudentProfile, SupervisorProfile, User
 
 
 class DepartmentSerializer(serializers.ModelSerializer):
@@ -138,18 +141,30 @@ class ProjectGroupReadSerializer(serializers.ModelSerializer):
 
 class GroupMemberReadSerializer(serializers.ModelSerializer):
     full_name = serializers.CharField(source="student.student_profile.full_name", read_only=True)
+    username = serializers.CharField(source="student.username", read_only=True)
+    student_id = serializers.UUIDField(source="student.id", read_only=True)
+    last_activity_at = serializers.SerializerMethodField()
+    is_online = serializers.SerializerMethodField()
+
+    def get_last_activity_at(self, obj):
+        return obj.student.last_activity_at if obj.left_at is None else None
+
+    def get_is_online(self, obj):
+        last_activity = self.get_last_activity_at(obj)
+        return bool(last_activity and last_activity >= timezone.now() - timedelta(minutes=5))
 
     class Meta:
         model = GroupMember
-        fields = ["id", "full_name", "joined_at"]
+        fields = ["id", "student_id", "full_name", "username", "is_leader", "joined_at", "left_at", "left_reason", "changed_by", "is_online", "last_activity_at"]
 
 
 class ProjectSupervisorReadSerializer(serializers.ModelSerializer):
     full_name = serializers.CharField(source="supervisor.supervisor_profile.full_name", read_only=True)
+    supervisor_id = serializers.UUIDField(read_only=True)
 
     class Meta:
         model = ProjectSupervisor
-        fields = ["id", "full_name", "started_at", "ended_at"]
+        fields = ["id", "supervisor_id", "full_name", "started_at", "ended_at", "ended_by", "end_type", "end_reason"]
 
 
 class GroupDetailReadSerializer(ProjectGroupReadSerializer):
@@ -164,7 +179,7 @@ class GroupDetailReadSerializer(ProjectGroupReadSerializer):
 
 
 class ProjectReadSerializer(serializers.ModelSerializer):
-    group = ProjectGroupReadSerializer(read_only=True)
+    group = GroupDetailReadSerializer(read_only=True)
 
     class Meta:
         model = Project
@@ -197,6 +212,100 @@ class ProjectRepositorySerializer(serializers.ModelSerializer):
         return f"https://github.com/{parts[0]}/{parts[1].removesuffix('.git')}"
 
 
+class ProjectPlanSerializer(serializers.ModelSerializer):
+    submitted_by_name = serializers.CharField(source="submitted_by.username", read_only=True)
+    reviewed_by_name = serializers.CharField(source="reviewed_by.username", read_only=True, allow_null=True)
+
+    class Meta:
+        model = ProjectPlan
+        fields = ["id", "version", "title", "objectives", "scope", "methodology", "tools", "task_assignments", "timeline", "risks", "expected_outputs", "submitted_by_name", "status", "review_note", "reviewed_by_name", "reviewed_at", "created_at"]
+        read_only_fields = fields
+
+
+class ProjectCommitteeSerializer(serializers.ModelSerializer):
+    department_name = serializers.CharField(source="department.name", read_only=True)
+    member_ids = serializers.SerializerMethodField()
+    member_names = serializers.SerializerMethodField()
+
+    def get_member_ids(self, obj):
+        return list(obj.members.order_by("supervisor_id").values_list("supervisor_id", flat=True))
+
+    def get_member_names(self, obj):
+        return [member.supervisor.supervisor_profile.full_name if hasattr(member.supervisor, "supervisor_profile") else member.supervisor.username for member in obj.members.select_related("supervisor__supervisor_profile").order_by("supervisor_id")]
+
+    class Meta:
+        model = ProjectCommittee
+        fields = ["id", "department", "department_name", "status", "member_ids", "member_names", "approved_at", "created_at", "updated_at"]
+        read_only_fields = fields
+
+
+class ProjectIdeaCommitteeReviewSerializer(serializers.ModelSerializer):
+    reviewer_id = serializers.UUIDField(read_only=True)
+    reviewer_name = serializers.CharField(source="reviewer.supervisor_profile.full_name", read_only=True)
+
+    class Meta:
+        model = ProjectIdeaCommitteeReview
+        fields = ["id", "reviewer_id", "reviewer_name", "recommendation", "note", "created_at", "updated_at"]
+        read_only_fields = fields
+
+
+class ProjectIdeaRevisionSerializer(serializers.ModelSerializer):
+    submitted_by_name = serializers.CharField(source="submitted_by.username", read_only=True)
+    project_id = serializers.UUIDField(read_only=True)
+    project_title = serializers.CharField(source="project.title", read_only=True)
+    department_name = serializers.CharField(source="project.group.department.name", read_only=True)
+    committee_reviews = ProjectIdeaCommitteeReviewSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = ProjectIdeaRevision
+        fields = ["id", "project_id", "project_title", "department_name", "version", "title", "problem", "objectives", "proposed_solution", "novelty", "submitted_by_name", "status", "supervisor_note", "supervisor_reviewed_at", "committee_reviews", "chair_note", "chair_reviewed_at", "created_at"]
+        read_only_fields = fields
+
+
+class DiscussionReadinessSerializer(serializers.ModelSerializer):
+    submitted_by_name = serializers.CharField(source="submitted_by.username", read_only=True)
+    final_filename = serializers.CharField(source="final_deliverable.original_filename", read_only=True)
+    report_filename = serializers.CharField(source="report_deliverable.original_filename", read_only=True)
+
+    class Meta:
+        model = DiscussionReadinessRequest
+        fields = ["id", "version", "final_deliverable", "final_filename", "report_deliverable", "report_filename", "submitted_by_name", "status", "supervisor_note", "supervisor_reviewed_at", "chair_note", "chair_reviewed_at", "created_at"]
+        read_only_fields = fields
+
+
+class DefenseCommitteeSerializer(serializers.ModelSerializer):
+    readiness_request_id = serializers.UUIDField(read_only=True)
+    project_id = serializers.UUIDField(source="readiness_request.project_id", read_only=True)
+    project_title = serializers.CharField(source="readiness_request.project.title", read_only=True)
+    department_name = serializers.CharField(source="readiness_request.project.group.department.name", read_only=True)
+    final_deliverable = serializers.UUIDField(source="readiness_request.final_deliverable_id", read_only=True)
+    final_filename = serializers.CharField(source="readiness_request.final_deliverable.original_filename", read_only=True)
+    report_deliverable = serializers.UUIDField(source="readiness_request.report_deliverable_id", read_only=True)
+    report_filename = serializers.CharField(source="readiness_request.report_deliverable.original_filename", read_only=True)
+    members = serializers.SerializerMethodField()
+
+    def get_members(self, obj):
+        return [{
+            "id": str(member.supervisor_id),
+            "name": member.supervisor.supervisor_profile.full_name if hasattr(member.supervisor, "supervisor_profile") else member.supervisor.username,
+            "is_chair": member.is_chair,
+        } for member in obj.members.select_related("supervisor__supervisor_profile").order_by("-is_chair", "supervisor_id")]
+
+    class Meta:
+        model = DefenseCommittee
+        fields = ["id", "readiness_request_id", "project_id", "project_title", "department_name", "final_deliverable", "final_filename", "report_deliverable", "report_filename", "status", "members", "approved_at", "defense_at", "defense_location", "minutes", "minutes_recorded_by", "minutes_recorded_at", "created_at"]
+        read_only_fields = fields
+
+
+class DefenseRubricCriterionSerializer(serializers.ModelSerializer):
+    updated_by_name = serializers.CharField(source="updated_by.username", read_only=True)
+
+    class Meta:
+        model = DefenseRubricCriterion
+        fields = ["id", "title", "description", "scope", "weight", "position", "is_active", "updated_by_name", "updated_at"]
+        read_only_fields = ["id", "updated_by_name", "updated_at"]
+
+
 class ProjectAppointmentSerializer(serializers.ModelSerializer):
     department = DepartmentSerializer(read_only=True)
     project_title = serializers.CharField(source="project.title", read_only=True, allow_null=True)
@@ -217,7 +326,52 @@ class ProjectNoteReadSerializer(serializers.ModelSerializer):
 
 class DeliverableReadSerializer(serializers.ModelSerializer):
     uploaded_by_name = serializers.CharField(source="uploaded_by.username", read_only=True)
+    stage_title = serializers.CharField(source="stage.title", read_only=True, allow_null=True)
 
     class Meta:
         model = Deliverable
-        fields = ["id", "uploaded_by_name", "original_filename", "media_type", "size_bytes", "status", "created_at"]
+        fields = ["id", "uploaded_by_name", "stage", "stage_title", "original_filename", "media_type", "size_bytes", "visibility", "status", "created_at"]
+
+
+class ProjectStageReviewSerializer(serializers.ModelSerializer):
+    actor_name = serializers.CharField(source="actor.username", read_only=True)
+
+    class Meta:
+        model = ProjectStageReview
+        fields = ["id", "actor_name", "action", "note", "created_at"]
+
+
+class ProjectStageSerializer(serializers.ModelSerializer):
+    reviews = ProjectStageReviewSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = ProjectStage
+        fields = ["id", "order", "title", "description", "starts_at", "due_at", "is_required", "progress", "status", "reviews"]
+        read_only_fields = ["id", "order", "is_required", "progress", "status", "reviews"]
+
+    def validate(self, attrs):
+        starts_at = attrs.get("starts_at", getattr(self.instance, "starts_at", None))
+        due_at = attrs.get("due_at", getattr(self.instance, "due_at", None))
+        if starts_at and due_at and due_at < starts_at:
+            raise serializers.ValidationError({"due_at": "يجب أن يكون موعد النهاية بعد البداية أو مساويًا لها."})
+        return attrs
+
+
+class ProjectTaskReadSerializer(serializers.ModelSerializer):
+    assigned_to_name = serializers.CharField(source="assigned_to.username", read_only=True, allow_null=True)
+    created_by_name = serializers.CharField(source="created_by.username", read_only=True)
+    stage_title = serializers.CharField(source="stage.title", read_only=True)
+
+    class Meta:
+        model = ProjectTask
+        fields = ["id", "stage", "stage_title", "title", "description", "assigned_to", "assigned_to_name", "created_by_name", "due_at", "status", "created_at", "updated_at"]
+        read_only_fields = fields
+
+
+class NotificationSerializer(serializers.ModelSerializer):
+    actor_name = serializers.CharField(source="actor.username", read_only=True, allow_null=True)
+
+    class Meta:
+        model = Notification
+        fields = ["id", "event_type", "title", "body", "target_url", "actor_name", "read_at", "created_at"]
+        read_only_fields = fields

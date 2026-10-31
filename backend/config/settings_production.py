@@ -1,7 +1,7 @@
 """Production settings. Configure every required value through the process environment."""
 
 import os
-from urllib.parse import urlsplit
+from urllib.parse import unquote, urlsplit
 
 from django.core.exceptions import ImproperlyConfigured
 
@@ -44,20 +44,35 @@ for origin in CORS_ALLOWED_ORIGINS:
         raise ImproperlyConfigured("Production CORS_ALLOWED_ORIGINS entries must be HTTPS origins without paths.")
 CSRF_TRUSTED_ORIGINS = sorted(CORS_ALLOWED_ORIGINS)
 
-database_url = _required("DATABASE_URL")
-parsed_database_url = urlsplit(database_url)
-if parsed_database_url.scheme not in {"postgres", "postgresql"} or not parsed_database_url.hostname or not parsed_database_url.path.strip("/"):
-    raise ImproperlyConfigured("Production DATABASE_URL must point to a PostgreSQL database.")
-if "replace" in (parsed_database_url.password or "").lower() or parsed_database_url.hostname.endswith(".invalid"):
-    raise ImproperlyConfigured("Replace DATABASE_URL placeholders with the real database credentials and host in the secret store.")
-DATABASE_SSLMODE = os.environ.get("DATABASE_SSLMODE", "verify-full").strip().lower()
-if DATABASE_SSLMODE not in {"verify-full", "verify-ca"}:
-    raise ImproperlyConfigured("Production DATABASE_SSLMODE must be verify-full or verify-ca.")
-DATABASES["default"]["OPTIONS"]["sslmode"] = DATABASE_SSLMODE  # noqa: F405
-DATABASES["default"]["OPTIONS"]["connect_timeout"] = 5  # noqa: F405
-ssl_root_cert = os.environ.get("DATABASE_SSLROOTCERT", "").strip()
-if ssl_root_cert:
-    DATABASES["default"]["OPTIONS"]["sslrootcert"] = ssl_root_cert  # noqa: F405
+database_url = os.environ.get("DATABASE_URL", "").strip()
+if not database_url:
+    # Keep the existing SQLite database in backend/db.sqlite3 unless an explicit
+    # database URL is configured. Production startup never changes database engines.
+    DATABASES["default"]["OPTIONS"] = {"timeout": 20}  # noqa: F405
+else:
+    parsed_database_url = urlsplit(database_url)
+    if parsed_database_url.scheme == "sqlite":
+        sqlite_path = unquote(parsed_database_url.path)
+        if not sqlite_path or not sqlite_path.startswith("/") or parsed_database_url.netloc:
+            raise ImproperlyConfigured("SQLite DATABASE_URL must contain an absolute local database path.")
+        DATABASES["default"] = {  # noqa: F405
+            "ENGINE": "django.db.backends.sqlite3",
+            "NAME": sqlite_path,
+            "OPTIONS": {"timeout": 20},
+        }
+    elif parsed_database_url.scheme in {"postgres", "postgresql"} and parsed_database_url.hostname and parsed_database_url.path.strip("/"):
+        if "replace" in (parsed_database_url.password or "").lower() or parsed_database_url.hostname.endswith(".invalid"):
+            raise ImproperlyConfigured("Replace DATABASE_URL placeholders with the real database credentials and host in the secret store.")
+        DATABASE_SSLMODE = os.environ.get("DATABASE_SSLMODE", "verify-full").strip().lower()
+        if DATABASE_SSLMODE not in {"verify-full", "verify-ca"}:
+            raise ImproperlyConfigured("PostgreSQL DATABASE_SSLMODE must be verify-full or verify-ca.")
+        DATABASES["default"]["OPTIONS"]["sslmode"] = DATABASE_SSLMODE  # noqa: F405
+        DATABASES["default"]["OPTIONS"]["connect_timeout"] = 5  # noqa: F405
+        ssl_root_cert = os.environ.get("DATABASE_SSLROOTCERT", "").strip()
+        if ssl_root_cert:
+            DATABASES["default"]["OPTIONS"]["sslrootcert"] = ssl_root_cert  # noqa: F405
+    else:
+        raise ImproperlyConfigured("DATABASE_URL must be an absolute SQLite URL or a valid PostgreSQL URL.")
 
 SESSION_COOKIE_SECURE = True
 SESSION_COOKIE_HTTPONLY = True

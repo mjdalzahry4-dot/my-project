@@ -58,8 +58,17 @@ def database_from_environment():
     if not database_url:
         return {"ENGINE": "django.db.backends.sqlite3", "NAME": BASE_DIR / "db.sqlite3"}
     parsed = urlparse(database_url)
+    if parsed.scheme == "sqlite":
+        sqlite_path = unquote(parsed.path)
+        if not sqlite_path.startswith("/") or parsed.netloc:
+            raise RuntimeError("SQLite DATABASE_URL must contain an absolute local database path.")
+        return {
+            "ENGINE": "django.db.backends.sqlite3",
+            "NAME": sqlite_path,
+            "OPTIONS": {"timeout": 20},
+        }
     if parsed.scheme not in {"postgres", "postgresql"}:
-        raise RuntimeError("DATABASE_URL must use postgresql:// or postgresql://.")
+        raise RuntimeError("DATABASE_URL must use sqlite:////absolute/path or postgresql://.")
     return {
         "ENGINE": "django.db.backends.postgresql",
         "NAME": unquote(parsed.path.lstrip("/")),
@@ -87,6 +96,7 @@ USE_I18N = True
 USE_TZ = True
 STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
+GPMS_MAX_UPLOAD_BYTES = int(os.environ.get("GPMS_MAX_UPLOAD_BYTES", str(10 * 1024 * 1024)))
 MEDIA_ROOT = Path(os.environ.get("DJANGO_MEDIA_ROOT", str(BASE_DIR / "media"))).resolve()
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
@@ -97,7 +107,7 @@ REST_FRAMEWORK = {
         "rest_framework.throttling.AnonRateThrottle",
         "rest_framework.throttling.UserRateThrottle",
     ],
-    "DEFAULT_THROTTLE_RATES": {"anon": "20/min", "user": "120/min", "login": "5/min", "password_reset": "3/hour"},
+    "DEFAULT_THROTTLE_RATES": {"anon": "20/min", "user": "120/min", "login": "20/min", "password_reset": "3/hour"},
     "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
     "PAGE_SIZE": 25,
 }

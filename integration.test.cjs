@@ -62,15 +62,15 @@ test('dashboard primary actions lead each role to its own workflow', async () =>
 
   const expectedActions = {
     dean: /data-page="requests"/,
-    chair: /data-action="new-group"/,
+    chair: /data-page="requests"/,
     supervisor: /data-page="projects"/,
-    student: /data-page="project"/,
+    student: /data-page="requests"/,
   };
   for (const [role, expected] of Object.entries(expectedActions)) {
     context.state.role = role;
     const markup = context.dashboard();
     assert.match(markup, expected, `${role} should have a role-specific primary action`);
-    if (role === 'student' || role === 'supervisor') assert.doesNotMatch(markup, /data-page="requests"/);
+    if (role === 'supervisor') assert.doesNotMatch(markup, /data-page="requests"/);
   }
   context.state.role = 'chair';
   context.state.page = 'drafts';
