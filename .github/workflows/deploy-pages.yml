@@ -4,7 +4,6 @@ on:
   push:
     branches:
       - main
-      - codex/finish-remaining-work
     paths:
       - "frontend/**"
       - ".github/workflows/deploy-pages.yml"
