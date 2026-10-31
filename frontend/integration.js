@@ -848,7 +848,7 @@ document.addEventListener('click', async event => {
     event.preventDefault(); event.stopImmediatePropagation();
     try {
       const result = await apiRequest(`/users/${encodeURIComponent(actionButton.dataset.userId)}/activation/`, { method: 'POST', body: '{}' });
-      state.activationLink = `${window.location.origin}/?activation=${encodeURIComponent(result.activation_token)}`;
+      state.activationLink = `${window.location.origin}${window.location.pathname}?activation=${encodeURIComponent(result.activation_token)}`;
       render(); toast('أُصدر رابط تفعيل صالح لساعة ولمرة واحدة.');
     } catch (error) { state.apiError = error.message; render(); toast(error.message, 'error'); }
     return;
