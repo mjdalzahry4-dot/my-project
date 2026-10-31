@@ -2,24 +2,25 @@
 
 هذه الملفات تجهز الإعدادات وخطوات النشر، ولا تعني أن النظام نُشر أو أن بيئة إنتاج حقيقية جرى اختبارها. لا تستخدم `runserver` في الإنتاج.
 
-## ما يلزم قبل اختيار الاستضافة
+## الإعداد المعتمد لهذا المشروع
+
+قاعدة الإنتاج الحالية SQLite. أبقِ ملف قاعدة البيانات نفسه وفي مساره الحالي؛ لا تضبط `DATABASE_URL` إلى PostgreSQL، ولا تنقل البيانات أو تبدّل محرك القاعدة. إعداد `config.settings_production` يحافظ على `backend/db.sqlite3` افتراضيًا، ويقبل `sqlite:////مسار/مطلق/إلى/db.sqlite3` إذا كان ملف الإنتاج في مسار آخر. لا تشغّل migrations إلا عند وجود ترحيل جديد وبعد أخذ نسخة احتياطية والتحقق من إمكانية استعادتها.
+
+GitHub مستودع للكود، وNetlify ينشر `frontend/` كواجهة ثابتة، وPythonAnywhere يشغّل Django مع ملف SQLite الحالي. GitHub Pages لا يشغّل Python/Django؛ لذلك لا يصلح وحده لاستضافة الخادم.
+
+## متطلبات التشغيل
 
 - نطاق DNS وشهادة HTTPS صالحة للواجهة وAPI، وخادم ويب/وكيل عكسي يُنهي TLS ويُمرر API إلى خادم WSGI/ASGI داخلي غير مكشوف للعامة.
-- قاعدة PostgreSQL مدعومة، واسم مستخدم محدود الصلاحيات، ونسخة CA من مزود قاعدة البيانات.
-- مخزن أسرار لحفظ `DJANGO_SECRET_KEY` و`DATABASE_URL` و`PGPASSFILE` خارج Git وسجلات التشغيل.
-- مساحة نسخ احتياطي مشفرة ومقيدة الوصول، مع سياسة مدة احتفاظ وموقع مستقل عن قاعدة البيانات.
-- لم تُنفذ وظائف البريد أو رفع الملفات؛ لا تعتمد على إرسال التفعيل أو استعادة كلمة المرور، ولا تضف تخزين ملفات قبل تحديد سياسة الجامعة.
+- مخزن أسرار لحفظ `DJANGO_SECRET_KEY` خارج Git وسجلات التشغيل.
+- مساحة نسخ احتياطي مشفرة ومقيدة الوصول لملف SQLite، مع اختبار دوري للاستعادة.
+- لم تُنفذ وظائف البريد أو الرسائل؛ التفعيل يدوي من واجهة العميد، واستعادة كلمة المرور تتطلب مراجعة رئيس القسم.
 
-لم يُعرف مزود الاستضافة أو النطاق أو حجم البيانات، لذلك لا يمكن تقدير تكلفة موثوقة. التكلفة تعتمد على مزود التطبيق وقاعدة PostgreSQL والتخزين الاحتياطي والبريد/التنبيهات عند اعتمادها.
-
-## الإعداد المستهدف
-
-GitHub مستودع للكود، وNetlify ينشر `frontend/` كواجهة ثابتة، وPythonAnywhere يشغّل Django مع PostgreSQL. GitHub Pages لا يشغّل Python/Django؛ لذلك لا يصلح وحده لاستضافة الخادم.
+تظل SQLite قاعدة المشروع. يقيّد هذا الاختيار التوسع والكتابات المتزامنة؛ أُبقي كما طلبت، مع نسخ احتياطي واختبار استعادة قبل أي نشر يمس البيانات.
 
 1. ادفع المستودع إلى GitHub بعد ضبط remote لحسابك. لا ترفع `.env` أو `backend/db.sqlite3` أو أي نسخة احتياطية.
 2. اربط مستودع GitHub بخدمة Netlify، وحدد `frontend/` مجلدًا للنشر. يضبط `netlify.toml` هذا المسار تلقائيًا.
 3. على PythonAnywhere، أنشئ تطبيق ويب Django من تبويب Web، واربطه بمستودع GitHub وثبت المتطلبات من `backend/requirements.txt` داخل virtualenv.
-4. فعّل PostgreSQL من تبويب Databases وأنشئ قاعدة ومستخدم تطبيق مستقلًا، ثم أدخل بيانات المضيف والمنفذ واسم القاعدة والمستخدم في `DATABASE_URL`. PostgreSQL المدمج في PythonAnywhere متاح كإضافة للخطط المدفوعة.
+4. احتفظ بملف SQLite الحالي في مكانه، وتحقق من قيمة `NAME` الفعلية في إعداد WSGI الجاري قبل اختيار `config.settings_production`. لا تنشئ قاعدة جديدة ولا تهيئ ملفًا فارغًا بديلًا.
 5. اضبط متغيرات البيئة في ملف WSGI الخاص بالتطبيق قبل استدعاء `get_wsgi_application`. ملف `.env.example` قالب توضيحي فقط؛ Django لا يحمّله تلقائيًا. ضع القيم الحقيقية في ملف WSGI على PythonAnywhere أو حمّل ملف أسرار خاصًا خارج Git. لا تضع أسرارًا حقيقية في المستودع.
 6. في ملف WSGI الذي يوفره تبويب Web، أضف المسار الفعلي إلى مجلد `backend` (المجلد الذي يحتوي `manage.py`) إلى `sys.path`، واضبط المتغيرات ثم استورد Django. مثال هيكلي، استبدل المسارات والقيم بقيم حسابك:
 
@@ -32,16 +33,15 @@ GitHub مستودع للكود، وNetlify ينشر `frontend/` كواجهة ث�
    os.environ["DJANGO_SECRET_KEY"] = "ضع_هنا_مفتاحًا_عشوائيًا_حقيقيًا_طويلًا"
    os.environ["DJANGO_ALLOWED_HOSTS"] = "mjdkhaled1.pythonanywhere.com"
    os.environ["CORS_ORIGINS"] = "https://mjdkhaled1.pythonanywhere.com,https://incandescent-stardust-31fbdc.netlify.app"
-   os.environ["DATABASE_URL"] = "postgresql://...بيانات_قاعدة_الإنتاج..."
-   os.environ["DATABASE_SSLMODE"] = "verify-full"
+   # اترك DATABASE_URL غير مضبوط لاستخدام backend/db.sqlite3 الحالي.
+   # إذا كان الملف في مكان آخر، استخدم DATABASE_URL بصيغة sqlite:////مسار/مطلق/للملف.
 
    from django.core.wsgi import get_wsgi_application
    application = get_wsgi_application()
    ```
 
-   احتفظ ببيانات الاتصال والمفتاح سريين، ولا تنس ضبط المتغيرات نفسها في جلسة Bash عند تشغيل migrations و`collectstatic`. اتبع إرشادات PythonAnywhere لإعداد WSGI ومتغيرات التطبيق.
-7. نفذ migrations و`collectstatic` من Bash بعد تحميل متغيرات الإنتاج. يتضمن `migrate` إنشاء جدول `rest_framework.authtoken` المستخدم لرموز الدخول. اربط `/static/` بمجلد `backend/staticfiles` من إعدادات Web وأعد تحميل التطبيق.
-8. أنشئ حساب العميد من Bash باستخدام `python backend/manage.py createsuperuser` بعد التأكد من أن `DATABASE_URL` يشير إلى قاعدة الإنتاج.
+   احتفظ بالمفتاح سريًا. لا تضبط `DATABASE_URL` إلى محرك آخر، ولا تنفذ أوامر تهيئة قاعدة بيانات. عند تشغيل أي migration مستقبلًا، خذ نسخة احتياطية قابلة للاستعادة أولًا.
+7. اربط `/static/` بمجلد `backend/staticfiles` من إعدادات Web، ثم أعد تحميل التطبيق. لا حاجة إلى migration للتغييرات الحالية.
 
 `frontend/runtime-config.js` يرسل طلبات الواجهة المنشورة إلى API PythonAnywhere. تسجيل الدخول يعيد رمز DRF مؤقتًا (12 ساعة) ترسله الواجهة لاحقًا بترويسة `Authorization: Token ...`؛ لا تعتمد الواجهة على ملفات تعريف ارتباط الطرف الثالث. إعدادات الإنتاج تسمح بأصول HTTPS المصرح بها في `CORS_ORIGINS` فقط، وتسمح بترويسة Authorization في طلبات CORS. `CSRF_TRUSTED_ORIGINS` يبقى مضبوطًا لصفحات Django الإدارية. عناوين HTTP على localhost تبقى لإعداد التطوير المحلي.
 

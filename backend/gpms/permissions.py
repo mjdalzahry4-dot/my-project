@@ -14,7 +14,9 @@ def request_queryset_for(user):
     if user.role == User.Role.DEAN:
         return qs
     if user.role == User.Role.DEPARTMENT_CHAIR and user.department_id:
-        return qs.filter(created_by=user, current_revision__department_id=user.department_id)
+        return qs.filter(current_revision__department_id=user.department_id)
+    if user.role == User.Role.STUDENT:
+        return qs.filter(created_by=user)
     return qs.none()
 
 

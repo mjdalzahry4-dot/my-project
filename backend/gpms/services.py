@@ -2,7 +2,7 @@ from django.db import IntegrityError, transaction
 from django.utils import timezone
 from rest_framework.exceptions import APIException, PermissionDenied, ValidationError
 
-from .models import AuditLog, Department, GroupMember, GroupRequest, OutboxEvent, Project, ProjectGroup, ProjectSupervisor, RequestDecision, RequestMember, RequestRevision, RequestSupervisor, StudentProfile, SupervisorProfile, User
+from .models import AuditLog, Department, GroupMember, GroupRequest, Notification, Project, ProjectGroup, ProjectStage, ProjectSupervisor, RequestDecision, RequestMember, RequestRevision, RequestSupervisor, StudentProfile, SupervisorProfile, User
 
 
 class Conflict(APIException):
@@ -15,8 +15,18 @@ def audit(actor, action, entity_type, entity_id=None, request=None, metadata=Non
     AuditLog.objects.create(actor=actor, action=action, entity_type=entity_type, entity_id=entity_id, request=request, safe_metadata=metadata or {})
 
 
+def notify_users(actor, recipients, event_type, title, body="", target_url=""):
+    unique = {user.id: user for user in recipients if user and (not actor or user.id != actor.id)}
+    Notification.objects.bulk_create([
+        Notification(recipient=user, actor=actor, event_type=event_type, title=title[:180], body=body[:500], target_url=target_url[:500])
+        for user in unique.values()
+    ])
+
+
 def check_department_scope(actor, department):
     if actor.role == User.Role.DEAN:
+        return
+    if actor.role == User.Role.STUDENT and actor.department_id == department.id:
         return
     if actor.role != User.Role.DEPARTMENT_CHAIR or not actor.department_id or actor.department_id != department.id:
         raise PermissionDenied("لا تملك صلاحية إدارة هذا القسم.")
@@ -96,10 +106,12 @@ def create_revision(request, data, actor):
 
 @transaction.atomic
 def create_request(actor, data):
-    if actor.role != User.Role.DEPARTMENT_CHAIR:
-        raise PermissionDenied("إنشاء طلب المجموعة متاح لرئيس القسم فقط.")
+    if actor.role != User.Role.STUDENT:
+        raise PermissionDenied("إنشاء طلب مجموعة متاح للطالب.")
     if not actor.department_id:
-        raise ValidationError("يجب ربط حساب رئيس القسم بقسم قبل إنشاء الطلب.")
+        raise ValidationError("يجب ربط حساب الطالب بقسم قبل إنشاء الطلب.")
+    if str(data["department_id"]) != str(actor.department_id):
+        raise PermissionDenied("يمكن للطالب إنشاء طلب ضمن قسمه فقط.")
     request = GroupRequest.objects.create(created_by=actor)
     try:
         revision = create_revision(request, data, actor)
@@ -121,7 +133,7 @@ def update_request(actor, request_id, data):
     return request
 
 
-def validate_revision_for_submission(revision):
+def validate_revision_for_submission(revision, actor=None):
     members = list(revision.members.select_related("existing_user").order_by("member_order"))
     if not members:
         raise ValidationError({"members": "أضف طالبًا واحدًا على الأقل."})
@@ -139,6 +151,8 @@ def validate_revision_for_submission(revision):
                 raise Conflict("أحد الطلاب مرتبط بمجموعة نشطة بالفعل.")
         elif User.objects.filter(username_normalized=member.username_normalized).exists():
             raise ValidationError({"members": "تعذر استخدام بعض بيانات الحسابات. راجع القسم للتحقق منها."})
+    if actor and actor.role == User.Role.STUDENT and not any(member.existing_user_id == actor.id for member in members):
+        raise ValidationError({"members": "يجب إضافة حسابك كعضو في المجموعة قبل إرسال الطلب."})
     supervisor = revision.supervisor
     if supervisor.supervisor_type == RequestSupervisor.Type.EXISTING:
         if not supervisor.existing_user or supervisor.existing_user.role != User.Role.SUPERVISOR or supervisor.existing_user.account_status != User.AccountStatus.ACTIVE:
@@ -152,8 +166,8 @@ def validate_revision_for_submission(revision):
 @transaction.atomic
 def submit_request(actor, request_id, expected_version=None):
     request = GroupRequest.objects.select_for_update().select_related("current_revision", "current_revision__department").get(id=request_id)
-    if request.created_by_id != actor.id or actor.role != User.Role.DEPARTMENT_CHAIR:
-        raise PermissionDenied("لا تملك صلاحية إرسال هذا الطلب.")
+    if request.created_by_id != actor.id or actor.role != User.Role.STUDENT:
+        raise PermissionDenied("يمكن لمنشئ الطلب من الطلاب إرساله فقط.")
     if request.status not in {GroupRequest.Status.DRAFT, GroupRequest.Status.RETURNED}:
         raise Conflict("الطلب ليس مسودة أو معادًا للتعديل.")
     if expected_version is not None and int(expected_version) != request.version:
@@ -161,7 +175,7 @@ def submit_request(actor, request_id, expected_version=None):
     if not request.current_revision_id:
         raise ValidationError("أضف بيانات الطلب قبل إرساله.")
     check_department_scope(actor, request.current_revision.department)
-    validate_revision_for_submission(request.current_revision)
+    validate_revision_for_submission(request.current_revision, actor)
     now = timezone.now()
     request.current_revision.submitted_at = now
     request.current_revision.save(update_fields=["submitted_at"])
@@ -171,35 +185,36 @@ def submit_request(actor, request_id, expected_version=None):
     request.version += 1
     request.save(update_fields=["status", "submitted_at", "closed_at", "version", "updated_at"])
     audit(actor, "group_request.submitted", "group_request", request.id, request, {"revision": request.current_revision.revision_number})
+    notify_users(actor, User.objects.filter(role=User.Role.DEPARTMENT_CHAIR, department=request.current_revision.department, account_status=User.AccountStatus.ACTIVE), "group_request.submitted", "طلب مجموعة جديد", request.current_revision.project_title, "/?page=requests")
     return request
 
 
-def _create_pending_account(role, username, phone, full_name):
-    user = User(username=username.strip(), role=role, phone=phone.strip(), account_status=User.AccountStatus.ACTIVATION_PENDING)
+def _create_pending_account(role, username, phone, full_name, department):
+    user = User(username=username.strip(), role=role, phone=phone.strip(), department=department, account_status=User.AccountStatus.ACTIVATION_PENDING)
     user.set_unusable_password()
     user.save()
     if role == User.Role.STUDENT:
         StudentProfile.objects.create(user=user, full_name=full_name.strip())
     else:
         SupervisorProfile.objects.create(user=user, full_name=full_name.strip())
-    # The outbox records a safe notification intent. A delivery worker must issue
-    # a one-time token at send time; no bearer secret is persisted in this event.
-    OutboxEvent.objects.create(event_type="account_activation_required", aggregate_id=user.id, safe_payload={"user_id": str(user.id)})
     return user
 
 
 @transaction.atomic
 def decide_request(actor, request_id, decision, note=""):
-    if actor.role != User.Role.DEAN:
-        raise PermissionDenied("اتخاذ قرار الاعتماد متاح لعميد الكلية فقط.")
+    if actor.role != User.Role.DEPARTMENT_CHAIR or not actor.department_id:
+        raise PermissionDenied("اعتماد المجموعة متاح لرئيس القسم المرتبط بها فقط.")
     if decision not in {RequestDecision.Decision.APPROVED, RequestDecision.Decision.RETURNED, RequestDecision.Decision.REJECTED}:
         raise ValidationError("القرار غير صالح.")
     if decision in {RequestDecision.Decision.RETURNED, RequestDecision.Decision.REJECTED} and not note.strip():
         raise ValidationError({"note": "ملاحظات الإعادة أو سبب الرفض مطلوب."})
     request = GroupRequest.objects.select_for_update().select_related("current_revision", "current_revision__department").get(id=request_id)
+    if request.created_by_id == actor.id:
+        raise PermissionDenied("لا يجوز لصاحب الطلب اتخاذ قرار الاعتماد عليه.")
     if request.status != GroupRequest.Status.PENDING or not request.current_revision_id:
         raise Conflict("لا يمكن اتخاذ قرار على طلب غير معلق.")
     revision = RequestRevision.objects.select_for_update().select_related("department").get(id=request.current_revision_id)
+    check_department_scope(actor, revision.department)
     validate_revision_for_submission(revision)
     now = timezone.now()
     if decision == RequestDecision.Decision.APPROVED:
@@ -212,16 +227,24 @@ def decide_request(actor, request_id, decision, note=""):
                 status=ProjectGroup.Status.ACTIVE,
             )
             project = Project.objects.create(group=group, title=revision.project_title, description=revision.project_description, status=Project.Status.ACTIVE)
+            default_stages = [
+                "التحليل والمتطلبات", "التصميم", "إعداد المكونات الأساسية", "التنفيذ والتطوير",
+                "الاختبار", "التوثيق", "التجهيز للتسليم والمناقشة",
+            ]
+            ProjectStage.objects.bulk_create([
+                ProjectStage(project=project, order=order, title=title)
+                for order, title in enumerate(default_stages, start=1)
+            ])
             for snapshot in revision.members.select_related("existing_user").order_by("member_order"):
-                student = snapshot.existing_user or _create_pending_account(User.Role.STUDENT, snapshot.username_proposed, snapshot.phone_proposed, snapshot.full_name)
+                student = snapshot.existing_user or _create_pending_account(User.Role.STUDENT, snapshot.username_proposed, snapshot.phone_proposed, snapshot.full_name, revision.department)
                 if snapshot.existing_user_id is None:
                     snapshot.existing_user = student
                     snapshot.save(update_fields=["existing_user"])
-                GroupMember.objects.create(group=group, student=student)
+                GroupMember.objects.create(group=group, student=student, is_leader=(student.id == request.created_by_id), changed_by=actor)
             supervisor_snapshot = revision.supervisor
             supervisor = supervisor_snapshot.existing_user
             if supervisor_snapshot.supervisor_type == RequestSupervisor.Type.NEW:
-                supervisor = _create_pending_account(User.Role.SUPERVISOR, supervisor_snapshot.username_proposed, supervisor_snapshot.phone_proposed, supervisor_snapshot.full_name)
+                supervisor = _create_pending_account(User.Role.SUPERVISOR, supervisor_snapshot.username_proposed, supervisor_snapshot.phone_proposed, supervisor_snapshot.full_name, revision.department)
             ProjectSupervisor.objects.create(project=project, supervisor=supervisor)
             decision_record = RequestDecision.objects.create(request=request, revision=revision, actor=actor, decision=decision, note=note.strip())
             request.status = GroupRequest.Status.APPROVED
@@ -229,6 +252,7 @@ def decide_request(actor, request_id, decision, note=""):
             request.version += 1
             request.save(update_fields=["status", "closed_at", "version", "updated_at"])
             audit(actor, "group_request.approved", "group_request", request.id, request, {"revision": revision.revision_number, "decision_id": str(decision_record.id), "project_id": str(project.id)})
+            notify_users(actor, [request.created_by, *[member.student for member in group.members.select_related("student")], supervisor], "group_request.approved", "تم اعتماد طلب المجموعة", revision.project_title, f"/?page=project&project={project.id}")
             return request
         except IntegrityError as exc:
             raise Conflict("تعذر اعتماد الطلب بسبب تعارض بيانات. لم تُفعّل المجموعة جزئيًا.") from exc
@@ -239,4 +263,5 @@ def decide_request(actor, request_id, decision, note=""):
     request.save(update_fields=["status", "closed_at", "version", "updated_at"])
     action = "group_request.returned" if decision == RequestDecision.Decision.RETURNED else "group_request.rejected"
     audit(actor, action, "group_request", request.id, request, {"revision": revision.revision_number, "decision_id": str(decision_record.id)})
+    notify_users(actor, [request.created_by], f"group_request.{request.status}", "تحديث على طلب المجموعة", note.strip(), "/?page=requests")
     return request
